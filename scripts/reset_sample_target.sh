@@ -37,4 +37,21 @@ def create_app() -> Flask:
     return app
 PY
 
+cat > sample-target/tests/test_index.py <<'PY'
+"""Baseline tests that exist before any pipeline run."""
+
+from __future__ import annotations
+
+from sample_app import create_app
+
+
+def test_index_returns_hello():
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"message": "hello"}
+PY
+
 echo "sample-target reset to clean state."

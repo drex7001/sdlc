@@ -19,7 +19,10 @@ Return **only** a single JSON object (no prose, no markdown fence) with this sha
 
 ## Critical constraints
 
-- `impacted_files` is a **governance contract**: code generation will be sandboxed to exactly these paths. Anything outside this list is rejected. List every file you will create OR modify. Use paths relative to the target repository root.
+- `impacted_files` is a **governance contract**: every downstream stage (code generation AND test generation) is sandboxed to exactly these paths. Anything outside this list is rejected. List every file you will create OR modify. Use paths relative to the target repository root.
+- **You MUST also list the test files** that the test-generation stage will create or modify. New test files belong under `tests/` and should follow the convention `tests/test_<module>.py` (one test file per new source module, plus integration tests as needed). Do NOT assume tests will be appended to existing baseline test files unless the spec is truly a small modification — prefer dedicated new test files for new features.
+- Decompose the implementation into **separate modules** when the feature introduces a distinct concern (e.g. a rate limiter and a status endpoint are two concerns → two source modules + two test files, not one mega-file).
+- **Wiring matters.** Whenever a new module exposes an entrypoint (Flask blueprint, route, CLI command, signal handler, etc.) the file that REGISTERS that entrypoint (e.g. the package `__init__.py` that calls `app.register_blueprint(...)`) MUST also be in `impacted_files`. Otherwise the feature is unreachable at runtime and integration tests will return 404.
 - Reference acceptance criteria by their AC-IDs in `test_strategy`.
 - Keep `design_summary` concrete: name the data structures, algorithms, libraries you intend to use.
 - Identify risks that could affect correctness, security, or performance — not generic risks.

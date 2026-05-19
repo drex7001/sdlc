@@ -48,8 +48,10 @@ def generate_tests(
     max_tokens: int = 8192,
 ) -> GeneratedChanges:
     system = load_prompt(prompts_dir, prompt_version, "testgen")
+    allowed_test_paths = sorted(p for p in plan.impacted_set() if p.startswith("tests/"))
     user_prompt = json.dumps(
         {
+            "allowed_test_paths": allowed_test_paths,
             "spec": spec.model_dump(),
             "plan": plan.model_dump(),
             "implementation_files": [
