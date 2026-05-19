@@ -5,6 +5,7 @@ services:
       dockerfile: docker/Dockerfile
     image: sdlc-pipeline:latest
     container_name: sdlc-dashboard
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "8000:8000"
     volumes:
@@ -12,6 +13,9 @@ services:
       - ../runs:/app/runs
       - ../audit.db:/app/audit.db
       - ../sample-target:/app/sample-target
+      # Dashboard launches pipeline runs in-process; needs specs/ to list
+      # existing specs and to write uploaded ones.
+      - ../specs:/app/specs
     env_file:
       - ../.env
     command: ["uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
