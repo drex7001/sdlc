@@ -223,11 +223,30 @@
     const MAX_BACKOFF_MS = 30000;
     let backoffMs = 0;
     let reloadPending = false;
+    const approvalForms = Array.from(document.querySelectorAll('.approval-panel form'));
+
+    function formSnapshot(form) {
+        return JSON.stringify(Array.from(form.elements)
+            .filter(el => el.name && !['submit', 'button', 'reset'].includes(el.type))
+            .map(el => {
+                const value = ['checkbox', 'radio'].includes(el.type) ? el.checked : el.value;
+                return [el.name, el.type, value];
+            }));
+    }
+
+    approvalForms.forEach(form => {
+        form.dataset.initialSnapshot = formSnapshot(form);
+    });
+
+    function hasDirtyApprovalForm() {
+        return approvalForms.some(form => form.dataset.initialSnapshot !== formSnapshot(form));
+    }
 
     function isInteracting() {
         const a = document.activeElement;
         if (a && a.matches && a.matches('input, textarea, select, button')) return true;
         if (document.querySelector('details[open]')) return true;
+        if (hasDirtyApprovalForm()) return true;
         return false;
     }
 

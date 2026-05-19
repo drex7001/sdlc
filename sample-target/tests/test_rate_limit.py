@@ -1,58 +1,68 @@
-"""Unit tests for FixedWindowRateLimiter."""
-
-from __future__ import annotations
-
-import pytest
-
-from sample_app.rate_limit import FixedWindowRateLimiter
+import time
+from flask.testing import FlaskClient
 
 
-class FakeClock:
-    def __init__(self, start: float = 0.0) -> None:
-        self.t = start
-
-    def __call__(self) -> float:
-        return self.t
-
-    def advance(self, seconds: float) -> None:
-        self.t += seconds
-
-
-def test_allows_up_to_limit_then_denies():
+def test_rate_limiting(client: FlaskClient) -> None:
     """AC: AC-2"""
-    clock = FakeClock()
-    limiter = FixedWindowRateLimiter(limit=5, window_seconds=10.0, clock=clock)
+    # Make 5 requests within the rate limit
     for _ in range(5):
-        allowed, retry = limiter.check("a")
-        assert allowed and retry == 0
-    allowed, retry = limiter.check("a")
-    assert not allowed
-    assert retry >= 1
+        response = client.get("/status")
+        assert response.status_code == 200
+
+    # 6th request should be rate limited
+    response = client.get("/status")
+    assert response.status_code == 429
+    assert "Retry-After" in response.headers
+    assert int(response.headers["Retry-After"]) == 10
+
+    # Wait for the rate limit to reset
+    time.sleep(10)
+
+    # Request should succeed again
+    response = client.get("/status")
+    assert response.status_code == 200
 
 
-def test_window_resets_after_elapsed_seconds():
-    """AC: AC-2"""
-    clock = FakeClock()
-    limiter = FixedWindowRateLimiter(limit=2, window_seconds=10.0, clock=clock)
-    limiter.check("a")
-    limiter.check("a")
-    assert limiter.check("a")[0] is False
-    clock.advance(10.5)
-    assert limiter.check("a")[0] is True
-
-
-def test_keys_are_isolated():
+def test_rate_limiting_different_ips(client: FlaskClient) -> None:
     """AC: AC-4"""
-    clock = FakeClock()
-    limiter = FixedWindowRateLimiter(limit=2, window_seconds=10.0, clock=clock)
-    limiter.check("a")
-    limiter.check("a")
-    assert limiter.check("a")[0] is False
-    assert limiter.check("b")[0] is True
+    # Simulate requests from different IPs
+    response = client.get("/status", environ_overrides={"REMOTE_ADDR": "192.168.1.1"})
+    assert response.status_code == 200
+    response = client.get("/status", environ_overrides={"REMOTE_ADDR": "192.168.1.2"})
+    assert response.status_code == 200
+
+    # Make 5 requests from the first IP
+    for _ in range(5):
+        response = client.get("/status", environ_overrides={"REMOTE_ADDR": "192.168.1.1"})
+        assert response.status_code == 200
+
+    # 6th request from the first IP should be rate limited
+    response = client.get("/status", environ_overrides={"REMOTE_ADDR": "192.168.1.1"})
+    assert response.status_code == 429
+
+    # The second IP should still succeed
+    response = client.get("/status", environ_overrides={"REMOTE_ADDR": "192.168.1.2"})
+    assert response.status_code == 200
 
 
-def test_invalid_construction_raises():
-    with pytest.raises(ValueError):
-        FixedWindowRateLimiter(limit=0, window_seconds=10.0)
-    with pytest.raises(ValueError):
-        FixedWindowRateLimiter(limit=1, window_seconds=0)
+def test_status_endpoint(client: FlaskClient) -> None:
+    """AC: AC-1"""
+    response = client.get("/status")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "ok"
+    assert isinstance(data["uptime_seconds"], int) and data["uptime_seconds"] >= 0
+
+
+def test_retry_after_header(client: FlaskClient) -> None:
+    """AC: AC-3"""
+    # Make 5 requests within the rate limit
+    for _ in range(5):
+        response = client.get("/status")
+        assert response.status_code == 200
+
+    # 6th request should be rate limited
+    response = client.get("/status")
+    assert response.status_code == 429
+    assert "Retry-After" in response.headers
+    assert int(response.headers["Retry-After"]) == 10

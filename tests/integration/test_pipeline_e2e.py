@@ -143,3 +143,30 @@ def test_rejected_approval_halts_run(
     assert run["status"] == "rejected"
     # No codegen artifact should exist — we halted before that stage.
     assert not (result.artifacts_dir / "codegen_output.json").exists()
+
+
+def test_test_apply_failure_is_recorded_on_testgen_stage(
+    sample_target: Path, runs_dir: Path, audit_db: Path, example_spec_path: Path,
+) -> None:
+    """A generated test file collision should not look like a gate-less mystery fail."""
+    (sample_target / "tests" / "test_status.py").write_text(
+        '"""Existing test file from a previous run."""\n',
+        encoding="utf-8",
+    )
+    settings = _settings(sample_target, runs_dir, audit_db)
+
+    with pytest.raises(PipelineError, match="testgen wanted to create tests/test_status.py"):
+        run_pipeline(
+            spec_path=example_spec_path,
+            settings=settings,
+            approval_mode=ApprovalMode.AUTO,
+        )
+
+    store = AuditStore(db_path=audit_db, runs_dir=runs_dir)
+    run = store.list_runs(limit=1)[0]
+    assert run["status"] == "failed"
+    stages = store.stages_for_run(run["run_id"])
+    assert [s["stage"] for s in stages] == ["plan", "codegen", "testgen"]
+    assert stages[-1]["status"] == "failed"
+    assert "testgen wanted to create tests/test_status.py" in stages[-1]["error"]
+    assert store.gates_for_run(run["run_id"]) == []

@@ -61,13 +61,13 @@ def apply_changes(
         if change.action == "create":
             if full.exists():
                 raise FileExistsError(
-                    f"codegen wanted to create {change.path} but it already exists"
+                    f"{kind} wanted to create {change.path} but it already exists"
                 )
             created.append(change.path)
         else:  # modify
             if not full.exists():
                 raise FileNotFoundError(
-                    f"codegen wanted to modify {change.path} but it does not exist"
+                    f"{kind} wanted to modify {change.path} but it does not exist"
                 )
             modified.append(change.path)
 

@@ -23,6 +23,7 @@ Return **only** a single JSON object (no prose, no markdown fence) with this sha
 ## Critical constraints
 
 - **You may ONLY write to file paths that appear in the `allowed_test_paths` list provided in the user message.** This list is the subset of `plan.impacted_files` that lives under `tests/`. Writing to any other path will be rejected by the sandbox and the whole pipeline will fail. If `allowed_test_paths` contains paths you do not need, simply omit them — but never invent new paths.
+- Use `action: "modify"` for paths present in `existing_test_files`. Use `action: "create"` only for allowed paths that are absent from `existing_test_files`.
 - Every test function MUST carry an AC tag in its docstring of the form `AC: AC-N`. The pytest gate parses these markers to compute acceptance-criteria coverage.
 - Cover **all** acceptance-criteria IDs in the spec. Each AC needs at least one test.
 - Include both unit tests (fast, isolated) and integration tests (Flask test client) where applicable.
@@ -33,6 +34,7 @@ Return **only** a single JSON object (no prose, no markdown fence) with this sha
 
 The user message contains:
 1. `allowed_test_paths` — the exact list of paths you may write to.
-2. The approved Plan (including `test_strategy`).
-3. The validated FeatureSpec (including all acceptance criteria).
-4. The just-generated implementation files (so tests can import them correctly).
+2. `existing_test_files` — contents for allowed test paths that already exist and must be modified rather than created.
+3. The approved Plan (including `test_strategy`).
+4. The validated FeatureSpec (including all acceptance criteria).
+5. The just-generated implementation files (so tests can import them correctly).

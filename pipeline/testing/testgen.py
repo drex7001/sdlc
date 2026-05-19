@@ -39,6 +39,7 @@ def generate_tests(
     spec: FeatureSpec,
     plan: Plan,
     impl_changes: GeneratedChanges,
+    target_dir: Path,
     llm: LLMClient,
     model: str,
     prompts_dir: Path,
@@ -49,9 +50,15 @@ def generate_tests(
 ) -> GeneratedChanges:
     system = load_prompt(prompts_dir, prompt_version, "testgen")
     allowed_test_paths = sorted(p for p in plan.impacted_set() if p.startswith("tests/"))
+    existing_test_files: dict[str, str] = {}
+    for path in allowed_test_paths:
+        target = target_dir / path
+        if target.exists() and target.is_file():
+            existing_test_files[path] = target.read_text(encoding="utf-8")
     user_prompt = json.dumps(
         {
             "allowed_test_paths": allowed_test_paths,
+            "existing_test_files": existing_test_files,
             "spec": spec.model_dump(),
             "plan": plan.model_dump(),
             "implementation_files": [

@@ -111,36 +111,43 @@ def run_pipeline(
         )
 
         # --- 4. Codegen ---------------------------------------------------
-        impl_changes = _stage(
-            audit, run, "codegen", metrics,
-            lambda: generate_code(
+        def _codegen_and_apply() -> GeneratedChanges:
+            changes = generate_code(
                 spec=spec, plan=plan, target_dir=settings.target_dir, llm=llm,
                 model=settings.codegen_model, prompts_dir=settings.prompts_dir,
                 prompt_version=settings.prompt_version, run=run, audit=audit,
                 max_tokens=settings.max_tokens,
-            ),
+            )
+            apply_changes(
+                changes=changes, target_dir=settings.target_dir,
+                run=run, audit=audit, kind="codegen",
+            )
+            return changes
+
+        impl_changes = _stage(
+            audit, run, "codegen", metrics, _codegen_and_apply,
         )
         result.impl_changes = impl_changes
-        apply_changes(
-            changes=impl_changes, target_dir=settings.target_dir,
-            run=run, audit=audit, kind="codegen",
-        )
 
         # --- 5. Testgen ---------------------------------------------------
-        test_changes = _stage(
-            audit, run, "testgen", metrics,
-            lambda: generate_tests(
-                spec=spec, plan=plan, impl_changes=impl_changes, llm=llm,
+        def _testgen_and_apply() -> GeneratedChanges:
+            changes = generate_tests(
+                spec=spec, plan=plan, impl_changes=impl_changes,
+                target_dir=settings.target_dir, llm=llm,
                 model=settings.testgen_model, prompts_dir=settings.prompts_dir,
                 prompt_version=settings.prompt_version, run=run, audit=audit,
                 max_tokens=settings.max_tokens,
-            ),
+            )
+            apply_changes(
+                changes=changes, target_dir=settings.target_dir,
+                run=run, audit=audit, kind="testgen",
+            )
+            return changes
+
+        test_changes = _stage(
+            audit, run, "testgen", metrics, _testgen_and_apply,
         )
         result.test_changes = test_changes
-        apply_changes(
-            changes=test_changes, target_dir=settings.target_dir,
-            run=run, audit=audit, kind="testgen",
-        )
 
         # --- 6. Gates -----------------------------------------------------
         gate_report = _stage(

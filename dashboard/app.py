@@ -189,7 +189,7 @@ def run_detail(request: Request, run_id: str) -> HTMLResponse:
     pending_checkpoint, just_approved_checkpoint = _approval_state(run, approvals)
 
     # Build a status map for the 8-step workflow diagram.
-    workflow = _workflow_status(stages, approvals, gates, run["status"])
+    workflow = _workflow_status(stages, approvals, gates, run["status"], run.get("current_stage"))
 
     is_live = run["status"] in {"pending", "running", "awaiting_approval"}
 
@@ -320,15 +320,18 @@ def _workflow_status(
     approvals: list[dict],
     gates: list[dict],
     run_status: str,
+    current_stage: str | None = None,
 ) -> list[dict[str, Any]]:
     by_stage = {s["stage"]: s for s in stages}
     approval_by_cp = {a["checkpoint"]: a for a in approvals}
-    decided_cps = set(approval_by_cp)
     any_gate_failed = any(g["status"] == "failed" for g in gates)
-    # The first checkpoint without an approval record is the one we're parked at.
-    current_pending_cp = next(
-        (cp for cp in ("plan", "finalize") if cp not in decided_cps), None
-    )
+    current_pending_cp: str | None = None
+    if run_status == "awaiting_approval" and current_stage:
+        prefix = "approval:"
+        if current_stage.startswith(prefix):
+            cp = current_stage[len(prefix):]
+            if cp in {"plan", "finalize"} and cp not in approval_by_cp:
+                current_pending_cp = cp
 
     out: list[dict[str, Any]] = []
     for key, label, kind in WORKFLOW_STEPS:
@@ -355,7 +358,7 @@ def _workflow_status(
             ap = approval_by_cp.get(cp)
             if ap:
                 status = ap["decision"]  # approved | rejected
-            elif run_status == "awaiting_approval" and cp == current_pending_cp:
+            elif cp == current_pending_cp:
                 status = "awaiting_approval"
             else:
                 status = "pending"
@@ -383,7 +386,7 @@ def run_state(run_id: str) -> JSONResponse:
         artifact_count = sum(1 for p in artifacts_dir.rglob("*") if p.is_file())
 
     pending_checkpoint, just_approved_checkpoint = _approval_state(run, approvals)
-    workflow = _workflow_status(stages, approvals, gates, run["status"])
+    workflow = _workflow_status(stages, approvals, gates, run["status"], run.get("current_stage"))
     gates_failed_summary = _gates_failed_summary(run["status"], gates)
     is_live = run["status"] in {"pending", "running", "awaiting_approval"}
     signature = _structural_signature(
