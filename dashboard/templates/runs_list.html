@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Runs{% endblock %}
+{% block content %}
+<h2>Recent runs</h2>
+{% if not runs %}
+<p>No runs yet. Try <code>pipeline run specs/example.yaml --approval-mode auto</code>.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Run ID</th>
+            <th>Spec</th>
+            <th>Status</th>
+            <th>Stage</th>
+            <th>Started</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in runs %}
+        <tr>
+            <td><a href="/runs/{{ r.run_id }}"><code>{{ r.run_id }}</code></a></td>
+            <td>{{ r.spec_name }}</td>
+            <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+            <td>{{ r.current_stage or '-' }}</td>
+            <td>{{ r.started_at }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

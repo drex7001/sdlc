@@ -1,0 +1,35 @@
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: sdlc-pipeline:latest
+    container_name: sdlc-dashboard
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist runs + audit DB on the host so dashboard survives restarts.
+      - ../runs:/app/runs
+      - ../audit.db:/app/audit.db
+      - ../sample-target:/app/sample-target
+    env_file:
+      - ../.env
+    command: ["uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  pipeline:
+    # Sibling service: run the CLI on demand without rebuilding.
+    image: sdlc-pipeline:latest
+    container_name: sdlc-pipeline-cli
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      - dashboard
+    volumes:
+      - ../runs:/app/runs
+      - ../audit.db:/app/audit.db
+      - ../sample-target:/app/sample-target
+      - ../specs:/app/specs
+    env_file:
+      - ../.env
+    entrypoint: ["pipeline"]
+    # Override at runtime:  docker compose run --rm pipeline run specs/example.yaml --approval-mode auto
+    command: ["--help"]

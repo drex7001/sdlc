@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Pipeline Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1><a href="/">Spec-driven Pipeline</a></h1>
+        <p class="tagline">AI-native delivery with deterministic governance</p>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>Prototype dashboard — no auth, single-tenant.</p>
+    </footer>
+</body>
+</html>

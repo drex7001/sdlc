@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.run_id }}{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All runs</a></p>
+<h2>Run <code>{{ run.run_id }}</code></h2>
+
+<section class="grid">
+    <div class="card">
+        <h3>Status</h3>
+        <p><span class="status status-{{ run.status }}">{{ run.status }}</span></p>
+        <p>Stage: <code>{{ run.current_stage or '-' }}</code></p>
+        <p>Spec: <code>{{ run.spec_name }}</code> · hash <code>{{ run.spec_hash[:12] }}</code></p>
+        <p>Provider: <code>{{ run.llm_provider }}</code> · model <code>{{ run.llm_model }}</code> · prompts <code>{{ run.prompt_version }}</code></p>
+    </div>
+    {% if metrics %}
+    <div class="card">
+        <h3>Metrics</h3>
+        <ul>
+            <li>Tokens: {{ metrics.total_tokens or 0 }}</li>
+            <li>Duration: {{ metrics.total_duration_ms or 0 }} ms</li>
+            <li>AC coverage: {{ metrics.ac_covered }}/{{ metrics.ac_total }}</li>
+            <li>Gates: {{ metrics.gates_passed }}/{{ metrics.gates_total }}</li>
+        </ul>
+    </div>
+    {% endif %}
+</section>
+
+{% if pending_checkpoints %}
+<section class="card pending">
+    <h3>Awaiting approval: {{ pending_checkpoints[0] }}</h3>
+    <form method="post" action="/runs/{{ run.run_id }}/approve/{{ pending_checkpoints[0] }}">
+        <label>Approver <input name="approver" value="dashboard@local"></label>
+        <label>Comment <input name="comment"></label>
+        <button name="decision" value="approved" type="submit">Approve</button>
+        <button name="decision" value="rejected" type="submit" class="danger">Reject</button>
+    </form>
+</section>
+{% endif %}
+
+<h3>Stages</h3>
+<table>
+    <thead><tr><th>Stage</th><th>Status</th><th>Duration</th><th>Error</th></tr></thead>
+    <tbody>
+        {% for s in stages %}
+        <tr>
+            <td>{{ s.stage }}</td>
+            <td><span class="status status-{{ s.status }}">{{ s.status }}</span></td>
+            <td>{{ s.duration_ms or '-' }} ms</td>
+            <td><code>{{ s.error or '' }}</code></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Quality gates</h3>
+<table>
+    <thead><tr><th>Gate</th><th>Status</th><th>Duration</th><th>Summary</th><th>Log</th></tr></thead>
+    <tbody>
+        {% for g in gates %}
+        <tr>
+            <td>{{ g.gate }}</td>
+            <td><span class="status status-{{ g.status }}">{{ g.status }}</span></td>
+            <td>{{ g.duration_ms or '-' }} ms</td>
+            <td>{{ g.summary }}</td>
+            <td>{% if g.artifact_path %}<a href="/runs/{{ run.run_id }}/artifact?path={{ g.artifact_path }}">view</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Approvals</h3>
+<table>
+    <thead><tr><th>Checkpoint</th><th>Decision</th><th>Approver</th><th>Comment</th><th>At</th></tr></thead>
+    <tbody>
+        {% for a in approvals %}
+        <tr>
+            <td>{{ a.checkpoint }}</td>
+            <td><span class="status status-{{ a.decision }}">{{ a.decision }}</span></td>
+            <td>{{ a.approver }}</td>
+            <td>{{ a.comment or '' }}</td>
+            <td>{{ a.created_at }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Artifacts</h3>
+<ul class="artifacts">
+    {% for a in artifacts %}
+    <li><a href="/runs/{{ run.run_id }}/artifact?path={{ a }}">{{ a }}</a></li>
+    {% endfor %}
+</ul>
+{% endblock %}

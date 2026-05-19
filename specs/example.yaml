@@ -1,0 +1,29 @@
+name: rate-limit-status-endpoint
+objective: >
+  Expose a /status endpoint on the sample app that reports application health
+  and is subject to per-IP rate limiting to protect against abuse.
+user_story: >
+  As an operator, I want a public /status endpoint that returns liveness and
+  uptime info, but is rate-limited per client IP so it cannot be used for
+  abuse or denial-of-service.
+business_rules:
+  - 'The endpoint returns HTTP 200 with JSON body {"status": "ok", "uptime_seconds": <int>}.'
+  - Each client IP is allowed at most 5 requests per 10-second window.
+  - Requests over the limit receive HTTP 429 with a Retry-After header.
+  - Rate limit state is kept in-memory; no external store required for the prototype.
+acceptance_criteria:
+  - id: AC-1
+    description: 'GET /status returns 200 and a JSON body with status="ok" and a non-negative integer uptime_seconds.'
+  - id: AC-2
+    description: The 6th request from the same IP within 10 seconds returns HTTP 429.
+  - id: AC-3
+    description: HTTP 429 responses include a Retry-After header with a positive integer value.
+  - id: AC-4
+    description: Requests from different IPs are tracked independently and do not share quota.
+non_functional:
+  - Response time under 50ms at p95 for the happy path.
+  - No external dependencies beyond the existing sample-target requirements.
+out_of_scope:
+  - Persistent rate-limit storage across restarts.
+  - Configurable per-route limits.
+  - Authentication.

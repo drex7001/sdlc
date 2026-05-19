@@ -1,0 +1,55 @@
+name: pipeline-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev tools
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install flask
+
+      - name: Ruff (pipeline source)
+        run: ruff check pipeline dashboard tests
+
+      - name: Mypy (pipeline source)
+        run: mypy pipeline dashboard
+
+      - name: Pytest (unit + integration with mock provider)
+        env:
+          PIPELINE_LLM_PROVIDER: mock
+        run: pytest -v
+
+      - name: End-to-end smoke run
+        env:
+          PIPELINE_LLM_PROVIDER: mock
+        run: |
+          pipeline validate specs/example.yaml
+          pipeline run specs/example.yaml --approval-mode auto
+          # Verify artifacts exist
+          test -d runs
+          ls runs/*/deployment_evidence.json
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-runs
+          path: |
+            runs/
+            audit.db
+          if-no-files-found: ignore

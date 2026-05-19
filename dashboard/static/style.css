@@ -1,0 +1,89 @@
+* { box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    background: #f5f6f8;
+    color: #1d1d1f;
+}
+header {
+    background: #1a1d21;
+    color: #f5f6f8;
+    padding: 1.5rem 2rem;
+}
+header h1 { margin: 0; font-size: 1.25rem; }
+header h1 a { color: inherit; text-decoration: none; }
+header .tagline { margin: 0.25rem 0 0; font-size: 0.85rem; opacity: 0.7; }
+main { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+footer { text-align: center; padding: 1.5rem; color: #6b6f76; font-size: 0.8rem; }
+h2 { margin-top: 0; }
+h3 { margin-top: 2rem; }
+code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    background: #eef0f3;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    border-radius: 4px;
+    overflow: hidden;
+}
+th, td {
+    text-align: left;
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid #eaecef;
+    font-size: 0.92rem;
+}
+th { background: #fafbfc; font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+.status {
+    display: inline-block;
+    padding: 0.1rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.status-succeeded, .status-passed, .status-approved { background: #d4edda; color: #155724; }
+.status-failed, .status-rejected { background: #f8d7da; color: #721c24; }
+.status-running, .status-awaiting_approval { background: #fff3cd; color: #856404; }
+.status-skipped { background: #e2e3e5; color: #383d41; }
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.card {
+    background: white;
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.card h3 { margin-top: 0; font-size: 1rem; }
+.card.pending { border-left: 4px solid #ffc107; background: #fffaf0; }
+.card.pending form { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; }
+.card.pending label { display: flex; flex-direction: column; font-size: 0.8rem; color: #555; }
+.card.pending input { padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 3px; font: inherit; }
+button {
+    padding: 0.45rem 1rem;
+    border: none;
+    border-radius: 3px;
+    background: #2563eb;
+    color: white;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+button.danger { background: #dc2626; }
+button:hover { filter: brightness(1.1); }
+.artifacts {
+    columns: 2;
+    column-gap: 1.5rem;
+}
+.artifacts li { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85rem; }
