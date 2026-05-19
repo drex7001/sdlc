@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Start a new run{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All runs</a></p>
+<h2>Start a new pipeline run</h2>
+
+{% if error %}
+<div class="card error">
+    <strong>Couldn't launch:</strong>
+    <pre>{{ error }}</pre>
+</div>
+{% endif %}
+
+<form method="post" action="/runs" enctype="multipart/form-data" class="card launcher">
+    <h3>1. Pick a spec on disk</h3>
+    <label class="block">
+        <span>Existing spec</span>
+        <select name="spec_path">
+            <option value="">— none —</option>
+            {% for s in specs %}
+            <option value="{{ s }}" {% if form.spec_path == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </label>
+
+    <h3>2. …or upload a new one</h3>
+    <label class="block">
+        <span>Upload .yaml, .yml, .md or .json (overrides dropdown)</span>
+        <input type="file" name="spec_file" accept=".yaml,.yml,.md,.json">
+    </label>
+
+    <h3>3. Run settings</h3>
+    <label class="block">
+        <span>Approver identity</span>
+        <input type="text" name="approver" value="{{ form.approver }}">
+    </label>
+
+    <div class="env-readout">
+        <strong>Active LLM:</strong>
+        <code>{{ settings.llm_provider }}</code> ·
+        plan=<code>{{ settings.plan_model }}</code> ·
+        codegen=<code>{{ settings.codegen_model }}</code> ·
+        testgen=<code>{{ settings.testgen_model }}</code> ·
+        prompts=<code>{{ settings.prompt_version }}</code>
+    </div>
+
+    <div class="actions">
+        <button type="submit">Launch run</button>
+        <a href="/" class="link-cancel">Cancel</a>
+    </div>
+</form>
+
+<p class="muted">
+    The pipeline runs on a background thread of the dashboard process. It pauses
+    at each governance checkpoint until you approve (or reject) here in the UI.
+</p>
+{% endblock %}

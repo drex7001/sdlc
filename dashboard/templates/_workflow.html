@@ -1,0 +1,23 @@
+{# 8-stage workflow diagram. Status classes drive color & animation. #}
+<section class="workflow">
+    <ol>
+        {% for step in workflow %}
+        <li class="stage-pill stage-{{ step.status }}" data-step-key="{{ step.key }}">
+            <a href="#stage-{{ step.key }}">
+                <span class="step-num">{{ loop.index }}</span>
+                <span class="step-label">{{ step.label }}</span>
+                <span class="step-status">{{ step.status }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ol>
+    <p class="workflow-legend">
+        <span class="legend-dot stage-succeeded"></span> succeeded
+        <span class="legend-dot stage-running"></span> running
+        <span class="legend-dot stage-awaiting_approval"></span> awaiting approval
+        <span class="legend-dot stage-approved"></span> approved
+        <span class="legend-dot stage-rejected"></span> rejected
+        <span class="legend-dot stage-failed"></span> failed
+        <span class="legend-dot stage-pending"></span> pending
+    </p>
+</section>

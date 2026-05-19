@@ -1,0 +1,15 @@
+{# Expandable card per stage. Lazy-loads prompts.jsonl via /runs/{id}/prompts. #}
+<article id="stage-{{ stage.stage }}" class="stage-card stage-{{ stage.status }}">
+    <header>
+        <span class="stage-card-title">{{ stage.stage }}</span>
+        <span class="status status-{{ stage.status }}">{{ stage.status }}</span>
+        <span class="stage-card-meta">{{ stage.duration_ms or '-' }} ms</span>
+    </header>
+    {% if stage.error %}
+    <div class="stage-error"><code>{{ stage.error }}</code></div>
+    {% endif %}
+    <details class="prompt-panel" data-stage="{{ stage.stage }}" data-run="{{ run.run_id }}">
+        <summary>Show LLM prompt &amp; response</summary>
+        <div class="prompt-body"><em>loading…</em></div>
+    </details>
+</article>

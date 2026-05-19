@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Runs{% endblock %}
 {% block content %}
-<h2>Recent runs</h2>
+<div class="page-header">
+    <h2>Recent runs</h2>
+    <a href="/new" class="btn-primary">+ Start a new run</a>
+</div>
 {% if not runs %}
-<p>No runs yet. Try <code>pipeline run specs/example.yaml --approval-mode auto</code>.</p>
+<p>No runs yet. Click <a href="/new">Start a new run</a> to drive the pipeline from a spec.</p>
 {% else %}
 <table>
     <thead>

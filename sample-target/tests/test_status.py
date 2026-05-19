@@ -1,51 +1,61 @@
+"""Integration tests for /status endpoint.
+
+Each test docstring carries an AC tag (e.g. AC: AC-1) so the pytest gate can
+compute acceptance-criteria coverage.
+"""
+
+from __future__ import annotations
+
 import pytest
-from flask import json
-from src.sample_app import create_app
+
+from sample_app import create_app
+from sample_app.status import _LIMITER
+
 
 @pytest.fixture
 def client():
+    _LIMITER._state.clear()
     app = create_app()
-    with app.test_client() as client:
-        yield client
+    app.config.update(TESTING=True)
+    return app.test_client()
 
 
-def test_status_endpoint(client):
+def test_status_returns_ok_and_uptime(client):
     """AC: AC-1"""
-    response = client.get('/status')
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    assert data['status'] == 'ok'
-    assert 'uptime_seconds' in data
-    assert data['uptime_seconds'] >= 0
+    resp = client.get("/status", environ_overrides={"REMOTE_ADDR": "10.0.0.1"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "ok"
+    assert isinstance(body["uptime_seconds"], int)
+    assert body["uptime_seconds"] >= 0
 
 
-def test_rate_limiting(client):
+def test_sixth_request_same_ip_is_rate_limited(client):
     """AC: AC-2"""
-    ip = '192.168.1.1'
+    env = {"REMOTE_ADDR": "10.0.0.2"}
     for _ in range(5):
-        client.get('/status', environ_overrides={'REMOTE_ADDR': ip})
-    response = client.get('/status', environ_overrides={'REMOTE_ADDR': ip})
-    assert response.status_code == 429
+        assert client.get("/status", environ_overrides=env).status_code == 200
+    resp = client.get("/status", environ_overrides=env)
+    assert resp.status_code == 429
 
 
-def test_retry_after_header(client):
+def test_rate_limited_response_has_retry_after(client):
     """AC: AC-3"""
-    ip = '192.168.1.2'
+    env = {"REMOTE_ADDR": "10.0.0.3"}
     for _ in range(5):
-        client.get('/status', environ_overrides={'REMOTE_ADDR': ip})
-    response = client.get('/status', environ_overrides={'REMOTE_ADDR': ip})
-    assert response.status_code == 429
-    assert 'Retry-After' in response.headers
-    assert int(response.headers['Retry-After']) > 0
+        client.get("/status", environ_overrides=env)
+    resp = client.get("/status", environ_overrides=env)
+    assert resp.status_code == 429
+    retry_after = resp.headers.get("Retry-After")
+    assert retry_after is not None
+    assert int(retry_after) > 0
 
 
-def test_independent_ip_tracking(client):
+def test_different_ips_have_independent_quota(client):
     """AC: AC-4"""
-    ip1 = '192.168.1.3'
-    ip2 = '192.168.1.4'
+    env_a = {"REMOTE_ADDR": "10.0.0.4"}
+    env_b = {"REMOTE_ADDR": "10.0.0.5"}
     for _ in range(5):
-        client.get('/status', environ_overrides={'REMOTE_ADDR': ip1})
-    response1 = client.get('/status', environ_overrides={'REMOTE_ADDR': ip1})
-    assert response1.status_code == 429
-    response2 = client.get('/status', environ_overrides={'REMOTE_ADDR': ip2})
-    assert response2.status_code == 200
+        assert client.get("/status", environ_overrides=env_a).status_code == 200
+    # IP A is now at the limit, IP B should still succeed.
+    assert client.get("/status", environ_overrides=env_b).status_code == 200
