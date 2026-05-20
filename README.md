@@ -2,11 +2,15 @@
 
 A prototype that transforms a structured feature specification into an implementation plan, code changes, automated tests, validation artefacts and deployment evidence — under deterministic governance controls.
 
-The pipeline has seven stages:
+The pipeline has eight stages — six work stages plus two human-approval checkpoints:
 
 ```
 spec ─► intake ─► plan ─► approval#1 ─► codegen ─► testgen ─► gates ─► approval#2 ─► finalize
+                                                          ↻
+                                                    repair (≤ N)
 ```
+
+If any gate fails, a tool-using repair agent runs (up to `PIPELINE_MAX_REPAIR_ATTEMPTS` times) and the gates are re-evaluated before the run halts. See [DIAGRAMS.md](DIAGRAMS.md) for the visual architecture.
 
 Two governance boundaries wrap the non-deterministic LLM steps:
 
@@ -34,6 +38,7 @@ PIPELINE_LLM_PROVIDER=mock pipeline run specs/example.yaml --approval-mode auto
 # 4. Inspect what happened
 pipeline status                                # list recent runs
 pipeline status <run-id>                       # one run's stages, gates, approvals
+pipeline approve <run-id> plan approved        # record an approval out-of-band
 ls runs/<run-id>/                              # raw artifacts
 
 # 5. Browse runs in a dashboard
@@ -111,23 +116,28 @@ Approval modes:
 | `dashboard` | Pipeline writes `awaiting_approval` to the audit DB and polls. Open the dashboard, click Approve / Reject. |
 | `auto` | No human — every checkpoint is auto-approved. Used in CI and demos. |
 
+Out-of-band, you can also record a decision from the CLI without opening the dashboard:
+
+```bash
+pipeline approve <run-id> plan approved        # checkpoint: plan | finalize
+pipeline approve <run-id> finalize rejected --comment "missing rollback"
+```
+
 ---
 
 ## Spec format
 
-Specs can be Markdown, YAML or JSON. Required sections:
+Specs can be Markdown, YAML or JSON. All sections are **required** — the validator rejects missing or empty sections **before** any LLM call (see `pipeline/intake/schema.py`):
 
 - `name` (kebab-case identifier)
 - `objective`
 - `user_story`
-- `business_rules` (list)
-- `acceptance_criteria` (list of `{id: "AC-N", description: "..."}`)
+- `business_rules` (non-empty list)
+- `acceptance_criteria` (non-empty list of `{id: "AC-N", description: "..."}`)
+- `non_functional` (non-empty list)
+- `out_of_scope` (non-empty list)
 
-Optional:
-- `non_functional`
-- `out_of_scope`
-
-See `specs/example.{md,yaml,json}` for canonical examples. The validator rejects missing sections **before** any LLM call.
+See `specs/example.{md,yaml,json}` for canonical examples.
 
 ---
 
@@ -137,15 +147,16 @@ See `specs/example.{md,yaml,json}` for canonical examples. The validator rejects
 pipeline/                # The pipeline package
   intake/                # Parse + validate specs
   planning/              # Spec → Plan via LLM
-  implementation/        # Plan → file changes + sandbox enforcement
+  implementation/        # Plan → file changes + sandbox enforcement + repair agent
   testing/               # Generated pytest files tagged with AC IDs
   gates/                 # ruff, mypy, pytest, bandit, custom policy
-  approval/              # Two-checkpoint human workflow
+  approval/              # Two-checkpoint human workflow (cli / dashboard / auto)
   llm/                   # Provider-pluggable client + versioned prompts
   audit/                 # SQLite index + filesystem artifacts
   metrics/               # Per-run telemetry
   orchestrator.py        # Wires every stage together
-  cli.py                 # Typer entrypoint (`pipeline run`)
+  config.py              # Settings dataclass + .env loader
+  cli.py                 # Typer entrypoint (`pipeline run|validate|status|approve`)
 
 dashboard/               # FastAPI + Jinja2 read-mostly UI
 targets/                 # Bundled apps the pipeline modifies
@@ -188,6 +199,8 @@ All are read from process env or from a `.env` file at the repo root (auto-loade
 | `PIPELINE_TARGET_DIR` | `./targets/flask-status` | Repo the pipeline modifies. Set to `./targets/crud-api` for the CRUD series. |
 | `PIPELINE_RUNS_DIR` | `./runs` | Where artifact directories are written. |
 | `PIPELINE_AUDIT_DB` | `./audit.db` | SQLite index path. |
+| `PIPELINE_MAX_REPAIR_ATTEMPTS` | `2` | How many repair-agent passes to run after a gate failure. Clamped to `[0, 5]`. |
+| `PIPELINE_MAX_AGENT_TURNS` | `12` | Tool-call budget for the codegen / repair agent's multi-turn loop. |
 | `APPROVER` | `unknown@local` | Reviewer identity recorded in approvals. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | — | Required for the corresponding real provider. |
 
@@ -259,4 +272,4 @@ sqlite3 audit.db "SELECT stage, status, duration_ms FROM stages WHERE run_id='<r
 - Anthropic provider uses prompt caching on the system message — repeated stages in the same run amortise instruction tokens.
 - The mock provider returns the **same canned outputs regardless of spec**. It exists to exercise the pipeline mechanics deterministically; it is not an evaluator of LLM intelligence.
 - Generated tests carry an `AC: AC-N` marker in their docstring. The pytest gate parses these to produce an acceptance-criteria coverage report.
-- See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions, trade-offs, limitations and future improvements.
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions, trade-offs, limitations and future improvements, and [DIAGRAMS.md](DIAGRAMS.md) for the high-level and low-level architecture diagrams.

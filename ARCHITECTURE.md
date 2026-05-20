@@ -6,12 +6,15 @@ The prompt asks for an AI-native pipeline that demonstrates *governance, reliabi
 
 ```
 spec ─► intake ─► plan ─► approval#1 ─► codegen ─► testgen ─► gates ─► approval#2 ─► finalize
-                                                ↑                ↑
+                                                ↑                ↑ ↻
                                           deterministic     deterministic
                                             sandbox            gates
+                                                          repair (≤ N attempts)
 ```
 
-Each stage is a small function `(input, context) → output`. Side effects (LLM calls, filesystem writes, gate subprocesses) are injected — every stage can be unit-tested in isolation, and the integration test uses the mock provider to exercise the full flow without API keys.
+There are eight stages in total — six work stages and two human-approval checkpoints (see `PIPELINE_STAGES` in `pipeline/orchestrator.py`). When the gate suite fails, a tool-using repair agent runs up to `PIPELINE_MAX_REPAIR_ATTEMPTS` times (each attempt is its own audit stage, `repair_1`, `repair_2`, …, with `gates_after_repair_N` rows for the re-run). Each stage is a small function `(input, context) → output`. Side effects (LLM calls, filesystem writes, gate subprocesses) are injected — every stage can be unit-tested in isolation, and the integration test uses the mock provider to exercise the full flow without API keys.
+
+For visual versions of the above (high-level + low-level), see [DIAGRAMS.md](DIAGRAMS.md).
 
 ## Key design decisions
 
@@ -90,6 +93,8 @@ Prompts live under `pipeline/llm/prompts/v1/`. The version used by a run is reco
 
 If you only read three files, read these:
 
-- `pipeline/orchestrator.py` — the seven-stage flow, top to bottom.
+- `pipeline/orchestrator.py` — the eight-stage flow, top to bottom.
 - `pipeline/implementation/sandbox.py` — what "governance" actually looks like in code.
 - `pipeline/audit/store.py` — how reproducibility is preserved.
+
+For a visual overview before diving into source, start with [DIAGRAMS.md](DIAGRAMS.md).
