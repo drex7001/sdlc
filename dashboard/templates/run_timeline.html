@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Timeline · {{ run.run_id }}{% endblock %}
+{% block content %}
+<p><a href="/runs/{{ run.run_id }}">&larr; Back to run detail</a></p>
+<h2>Timeline · <code>{{ run.run_id }}</code></h2>
+<p class="muted">
+    {{ event_count }} event{{ '' if event_count == 1 else 's' }} ·
+    spec <code>{{ run.spec_name }}</code> · status
+    <span class="status status-{{ run.status }}">{{ run.status }}</span>
+</p>
+
+{% if events %}
+<ol class="timeline">
+    {% for e in events %}
+    <li class="timeline-event timeline-{{ e.kind }} status-{{ e.status }}">
+        <div class="timeline-rail">
+            <time class="timeline-ts">{{ e.ts }}</time>
+            <span class="timeline-dot"></span>
+        </div>
+        <div class="timeline-card">
+            <header>
+                <span class="timeline-kind">{{ e.kind|replace('_', ' ') }}</span>
+                <strong>
+                    {% if e.anchor %}<a href="/runs/{{ run.run_id }}#{{ e.anchor }}">{{ e.label }}</a>{% else %}{{ e.label }}{% endif %}
+                </strong>
+                <span class="status status-{{ e.status }}">{{ e.status }}</span>
+            </header>
+            {% if e.detail %}<p class="timeline-detail">{{ e.detail }}</p>{% endif %}
+            {% if e.get('error') %}<pre class="timeline-error">{{ e.error }}</pre>{% endif %}
+            {% if e.get('artifact_path') %}
+            <p class="timeline-link">
+                <a href="/runs/{{ run.run_id }}/artifact?path={{ e.artifact_path }}">view log</a>
+            </p>
+            {% endif %}
+        </div>
+    </li>
+    {% endfor %}
+</ol>
+{% else %}
+<p class="muted">No events yet — this run hasn't started writing audit rows.</p>
+{% endif %}
+
+{% endblock %}

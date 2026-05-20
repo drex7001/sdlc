@@ -37,7 +37,7 @@ pipeline = "pipeline.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["pipeline*", "dashboard*"]
-exclude = ["sample-target*", "tests*", "runs*"]
+exclude = ["targets*", "sample-target*", "tests*", "runs*"]
 
 [tool.setuptools.package-data]
 "pipeline.llm" = ["prompts/**/*.md"]

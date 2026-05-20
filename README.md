@@ -28,7 +28,7 @@ pip install -e ".[dev]" flask
 # 2. Validate a spec (no LLM call)
 pipeline validate specs/example.yaml
 
-# 3. Run end-to-end against the bundled sample-target app, with the mock provider
+# 3. Run end-to-end against the bundled flask-status target, with the mock provider
 PIPELINE_LLM_PROVIDER=mock pipeline run specs/example.yaml --approval-mode auto
 
 # 4. Inspect what happened
@@ -40,9 +40,41 @@ ls runs/<run-id>/                              # raw artifacts
 uvicorn dashboard.app:app --port 8000
 # open http://localhost:8000
 
-# 6. Reset the sample-target before re-running (it gets mutated by the pipeline)
-./scripts/reset_sample_target.sh
+# 6. Reset a target before re-running (it gets mutated by the pipeline)
+./scripts/reset_target.sh flask-status
 ```
+
+### Demo: CRUD series
+
+`targets/crud-api/` is a near-empty FastAPI app. The pipeline can build it up
+one feature at a time. Each spec runs as a separate pipeline invocation, so
+later specs see the code the earlier specs produced.
+
+```bash
+./scripts/reset_target.sh crud-api
+
+PIPELINE_TARGET_DIR=./targets/crud-api \
+  pipeline run specs/crud/01-create-item.yaml --approval-mode auto
+
+PIPELINE_TARGET_DIR=./targets/crud-api \
+  pipeline run specs/crud/02-list-items.yaml --approval-mode auto
+
+PIPELINE_TARGET_DIR=./targets/crud-api \
+  pipeline run specs/crud/03-delete-item.yaml --approval-mode auto
+```
+
+The mock provider's canned plan is keyed to `flask-status`; run the CRUD
+series with `PIPELINE_LLM_PROVIDER=anthropic` (or `openai`) so the model
+actually generates the FastAPI code.
+
+### Repair loop
+
+When any gate (ruff / mypy / pytest / bandit / policy) fails after codegen,
+the pipeline drives a tool-using **repair agent** with the failing gate's log,
+the current code, and the same sandbox the planner approved. It can read
+files, inspect logs and `write_files` minimal corrections. Up to
+`PIPELINE_MAX_REPAIR_ATTEMPTS` attempts (default 2) before the run fails for
+real. Each attempt is its own audit stage (`repair_1`, `repair_2`).
 
 ### Using a real LLM provider
 
@@ -116,7 +148,9 @@ pipeline/                # The pipeline package
   cli.py                 # Typer entrypoint (`pipeline run`)
 
 dashboard/               # FastAPI + Jinja2 read-mostly UI
-sample-target/           # Tiny Flask app the pipeline modifies
+targets/                 # Bundled apps the pipeline modifies
+  flask-status/          #   - Tiny Flask app for the rate-limit demo
+  crud-api/              #   - FastAPI baseline for the layered CRUD spec series
 specs/                   # Example feature specifications
 tests/                   # Pipeline's own tests (unit + integration)
 runs/                    # Per-run artifact directories (created at runtime)
@@ -151,7 +185,7 @@ All are read from process env or from a `.env` file at the repo root (auto-loade
 | `PIPELINE_TESTGEN_MODEL` | falls back to `PIPELINE_LLM_MODEL` | Model used for test generation. |
 | `PIPELINE_MAX_TOKENS` | `8192` | Max output tokens per LLM call. Bump if codegen is being truncated. |
 | `PIPELINE_PROMPT_VERSION` | `v1` | Subdirectory under `pipeline/llm/prompts/`. Pinned per run. |
-| `PIPELINE_TARGET_DIR` | `./sample-target` | Repo the pipeline modifies. |
+| `PIPELINE_TARGET_DIR` | `./targets/flask-status` | Repo the pipeline modifies. Set to `./targets/crud-api` for the CRUD series. |
 | `PIPELINE_RUNS_DIR` | `./runs` | Where artifact directories are written. |
 | `PIPELINE_AUDIT_DB` | `./audit.db` | SQLite index path. |
 | `APPROVER` | `unknown@local` | Reviewer identity recorded in approvals. |
@@ -180,15 +214,16 @@ ruff check pipeline dashboard tests
 mypy pipeline dashboard
 ```
 
-The integration tests use a tmp-copied `sample-target` so they don't depend on the on-disk state. CI runs all of the above on every push (see [`.github/workflows/pipeline-ci.yml`](.github/workflows/pipeline-ci.yml)).
+The integration tests use a tmp-copied `targets/flask-status` so they don't depend on the on-disk state. CI runs all of the above on every push (see [`.github/workflows/pipeline-ci.yml`](.github/workflows/pipeline-ci.yml)).
 
 ### Cleaning between runs
 
-A pipeline run **mutates `sample-target/` in place** — new files appear, `__init__.py` gets the new blueprint registered. To re-run cleanly:
+A pipeline run **mutates the target dir in place** — new files appear, `__init__.py` gets the new blueprint registered. To re-run cleanly:
 
 ```bash
-# Restore sample-target to its pristine baseline
-./scripts/reset_sample_target.sh
+# Restore one target (or pass no arg to reset all)
+./scripts/reset_target.sh flask-status
+./scripts/reset_target.sh crud-api
 
 # Optionally also drop the run artifacts and audit DB
 rm -rf runs audit.db

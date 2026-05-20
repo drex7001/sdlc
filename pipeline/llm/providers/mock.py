@@ -6,25 +6,43 @@ exercised without any API keys.
 
 Dispatch is by *stage sentinel* embedded in the system prompt. This keeps the
 mock decoupled from the actual prompt wording.
+
+For the tool-using codegen / repair stages the mock supports two modes:
+
+* *Default* (no scripted scenario): a single turn that emits one ``write_files``
+  tool_use carrying the canned codegen response. Lets the existing
+  integration tests exercise the agent loop end-to-end with no API key.
+* *Scripted* (per-test): set :attr:`MockClient.scenarios` keyed by stage to a
+  list of turn descriptors. Each descriptor either commits files
+  (``{"write": {...}}``) or proposes a sandbox-violating path
+  (``{"write_bad": ...}``) or emits a non-tool turn (``{"text": "..."}``)
+  to test exotic failure modes.
 """
 
 from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any
 
-from ..client import LLMResponse
+from ..client import LLMResponse, ToolUse
 
 STAGE_SENTINELS = {
     "<<STAGE:PLAN>>": "plan",
     "<<STAGE:CODEGEN>>": "codegen",
+    "<<STAGE:CODEGEN_AGENT>>": "codegen_agent",
     "<<STAGE:TESTGEN>>": "testgen",
+    "<<STAGE:REPAIR>>": "repair",
 }
 
 
 class MockClient:
     provider_name = "mock"
+
+    # Class-level so tests can monkey-patch without re-instantiating. Each
+    # entry is a list of turn descriptors; the mock pops one per call.
+    scenarios: dict[str, list[dict[str, Any]]] = {}
 
     def complete(
         self,
@@ -46,6 +64,80 @@ class MockClient:
             usage={"input_tokens": len(prompt) // 4, "output_tokens": len(text) // 4},
             raw={"stage": stage, "deterministic": True},
             latency_ms=latency_ms,
+            stop_reason="end_turn",
+        )
+
+    def complete_with_tools(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str,
+        temperature: float = 0.2,
+        max_tokens: int = 8192,
+    ) -> LLMResponse:
+        stage = self._detect_stage(system)
+        start = time.perf_counter()
+
+        descriptor = self._next_turn(stage)
+        if descriptor is None:
+            # Default: terminal write_files call with the canned codegen blob.
+            descriptor = {"write": _CODEGEN_RESPONSE}
+
+        tool_use_id = f"toolu_{uuid.uuid4().hex[:12]}"
+        assistant_content: list[dict[str, Any]] = []
+        tool_uses: list[ToolUse] = []
+        text = descriptor.get("text", "")
+        if text:
+            assistant_content.append({"type": "text", "text": text})
+
+        if "write" in descriptor:
+            assistant_content.append({
+                "type": "tool_use",
+                "id": tool_use_id,
+                "name": "write_files",
+                "input": descriptor["write"],
+            })
+            tool_uses.append(ToolUse(id=tool_use_id, name="write_files", input=descriptor["write"]))
+            stop_reason = "tool_use"
+        elif "read" in descriptor:
+            assistant_content.append({
+                "type": "tool_use",
+                "id": tool_use_id,
+                "name": "read_file",
+                "input": {"path": descriptor["read"]},
+            })
+            tool_uses.append(ToolUse(id=tool_use_id, name="read_file", input={"path": descriptor["read"]}))
+            stop_reason = "tool_use"
+        elif "read_gate_log" in descriptor:
+            assistant_content.append({
+                "type": "tool_use",
+                "id": tool_use_id,
+                "name": "read_gate_log",
+                "input": {"gate": descriptor["read_gate_log"]},
+            })
+            tool_uses.append(ToolUse(
+                id=tool_use_id, name="read_gate_log",
+                input={"gate": descriptor["read_gate_log"]},
+            ))
+            stop_reason = "tool_use"
+        else:
+            # No tool — pure text turn (used to test "agent stopped" failure).
+            stop_reason = "end_turn"
+
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        prompt_len = sum(len(str(m.get("content", ""))) for m in messages)
+        return LLMResponse(
+            text=text,
+            model=model,
+            provider=self.provider_name,
+            usage={"input_tokens": prompt_len // 4, "output_tokens": 256},
+            raw={"stage": stage, "deterministic": True},
+            latency_ms=latency_ms,
+            stop_reason=stop_reason,
+            tool_uses=tool_uses,
+            assistant_content=assistant_content,
         )
 
     @staticmethod
@@ -57,6 +149,22 @@ class MockClient:
             "mock provider could not detect stage sentinel in system prompt; "
             "ensure prompt templates contain one of: " + ", ".join(STAGE_SENTINELS)
         )
+
+    @classmethod
+    def _next_turn(cls, stage: str) -> dict[str, Any] | None:
+        queue = cls.scenarios.get(stage)
+        if queue:
+            return queue.pop(0)
+        return None
+
+    @classmethod
+    def set_scenario(cls, stage: str, turns: list[dict[str, Any]]) -> None:
+        """Test helper: queue the next ``turns`` responses for ``stage``."""
+        cls.scenarios[stage] = list(turns)
+
+    @classmethod
+    def reset_scenarios(cls) -> None:
+        cls.scenarios = {}
 
 
 # --- Canned responses --------------------------------------------------------

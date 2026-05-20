@@ -12,7 +12,36 @@
 {% endif %}
 
 <form method="post" action="/runs" enctype="multipart/form-data" class="card launcher">
-    <h3>1. Pick a spec on disk</h3>
+    <h3>1. Pick a project (target)</h3>
+    <p class="muted small">
+        The pipeline will read from and write to this directory. Bundled
+        targets under <code>./targets/</code> are pre-listed; pick
+        <em>Use a custom path…</em> to drive any other project on disk.
+    </p>
+    <label class="block">
+        <span>Project</span>
+        <select name="project_key" id="project_key">
+            {% for proj in projects %}
+            <option value="{{ proj.key }}"
+                    {% if form.project_key == proj.key %}selected{% endif %}
+                    {% if not proj.valid %}disabled{% endif %}>
+                {{ proj.label }} — <code>{{ proj.path }}</code>{% if not proj.valid %} (missing pyproject.toml){% endif %}
+            </option>
+            {% endfor %}
+            <option value="{{ custom_key }}" {% if form.project_key == custom_key %}selected{% endif %}>
+                Use a custom path…
+            </option>
+        </select>
+    </label>
+    <label class="block" id="project_path_block"
+           style="{% if form.project_key != custom_key %}display:none;{% endif %}">
+        <span>Custom project path (absolute)</span>
+        <input type="text" name="project_path" id="project_path"
+               placeholder="/abs/path/to/your/project"
+               value="{{ form.project_path }}">
+    </label>
+
+    <h3>2. Pick a spec on disk</h3>
     <label class="block">
         <span>Existing spec</span>
         <select name="spec_path">
@@ -23,13 +52,13 @@
         </select>
     </label>
 
-    <h3>2. …or upload a new one</h3>
+    <h3>3. …or upload a new one</h3>
     <label class="block">
         <span>Upload .yaml, .yml, .md or .json (overrides dropdown)</span>
         <input type="file" name="spec_file" accept=".yaml,.yml,.md,.json">
     </label>
 
-    <h3>3. Run settings</h3>
+    <h3>4. Run settings</h3>
     <label class="block">
         <span>Approver identity</span>
         <input type="text" name="approver" value="{{ form.approver }}">
@@ -54,4 +83,19 @@
     The pipeline runs on a background thread of the dashboard process. It pauses
     at each governance checkpoint until you approve (or reject) here in the UI.
 </p>
+
+<script>
+// Reveal the custom-path input only when "Use a custom path…" is selected.
+(function () {
+    var sel = document.getElementById("project_key");
+    var block = document.getElementById("project_path_block");
+    var customKey = {{ custom_key|tojson }};
+    if (!sel || !block) return;
+    function sync() {
+        block.style.display = (sel.value === customKey) ? "" : "none";
+    }
+    sel.addEventListener("change", sync);
+    sync();
+})();
+</script>
 {% endblock %}

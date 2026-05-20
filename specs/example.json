@@ -16,7 +16,7 @@
   ],
   "non_functional": [
     "Response time under 50ms at p95 for the happy path.",
-    "No external dependencies beyond the existing sample-target requirements."
+    "No external dependencies beyond the existing flask-status target requirements."
   ],
   "out_of_scope": [
     "Persistent rate-limit storage across restarts.",

@@ -35,6 +35,8 @@ BASE_DIR = Path(__file__).resolve().parent
 SPECS_DIR = REPO_ROOT / "specs"
 UPLOADS_DIR = SPECS_DIR / "uploads"
 SPEC_EXTENSIONS = {".yaml", ".yml", ".md", ".json"}
+TARGETS_DIR = REPO_ROOT / "targets"
+CUSTOM_PROJECT_KEY = "__custom__"
 
 app = FastAPI(title="Spec-driven Pipeline Dashboard")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -64,6 +66,55 @@ def _list_specs() -> list[str]:
     return sorted(found)
 
 
+def _list_projects() -> list[dict[str, Any]]:
+    """Bundled targets under ./targets/* the pipeline can operate on.
+
+    Each entry has: ``key`` (basename, used as form value), ``label`` (display
+    name), ``path`` (absolute), ``valid`` (has a pyproject.toml so the gates
+    can run against it).
+    """
+    if not TARGETS_DIR.exists():
+        return []
+    projects: list[dict[str, Any]] = []
+    for p in sorted(TARGETS_DIR.iterdir()):
+        if not p.is_dir() or p.name.startswith("."):
+            continue
+        projects.append({
+            "key": p.name,
+            "label": p.name,
+            "path": str(p.resolve()),
+            "valid": (p / "pyproject.toml").exists(),
+        })
+    return projects
+
+
+def _resolve_project(project_key: str, project_path: str) -> tuple[Path | None, str | None]:
+    """Pick a target_dir from form input. Returns ``(target_dir, error)``."""
+    if project_key == CUSTOM_PROJECT_KEY:
+        if not project_path.strip():
+            return None, "Custom project: please type an absolute path."
+        candidate = Path(project_path).expanduser()
+        if not candidate.is_absolute():
+            return None, f"Custom project path must be absolute: {project_path!r}"
+        candidate = candidate.resolve()
+        if not candidate.exists() or not candidate.is_dir():
+            return None, f"Custom project directory does not exist: {candidate}"
+        if not (candidate / "pyproject.toml").exists():
+            return None, (
+                f"Custom project at {candidate} has no pyproject.toml — "
+                "the gates (ruff / mypy / pytest) need it to run."
+            )
+        return candidate, None
+    if not project_key:
+        return None, "Pick a project from the dropdown."
+    for proj in _list_projects():
+        if proj["key"] == project_key:
+            if not proj["valid"]:
+                return None, f"Project {project_key!r} is missing a pyproject.toml."
+            return Path(proj["path"]), None
+    return None, f"Unknown project: {project_key!r}"
+
+
 @app.get("/", response_class=HTMLResponse)
 def runs_list(request: Request) -> HTMLResponse:
     store = _store()
@@ -74,11 +125,15 @@ def runs_list(request: Request) -> HTMLResponse:
 @app.get("/new", response_class=HTMLResponse)
 def new_run_form(request: Request) -> HTMLResponse:
     settings = Settings.load()
+    projects = _list_projects()
+    default_key = projects[0]["key"] if projects else CUSTOM_PROJECT_KEY
     return templates.TemplateResponse(
         request,
         "new_run.html",
         {
             "specs": _list_specs(),
+            "projects": projects,
+            "custom_key": CUSTOM_PROJECT_KEY,
             "settings": {
                 "llm_provider": settings.llm_provider,
                 "plan_model": settings.plan_model,
@@ -87,7 +142,12 @@ def new_run_form(request: Request) -> HTMLResponse:
                 "prompt_version": settings.prompt_version,
             },
             "error": None,
-            "form": {"spec_path": "", "approver": "dashboard@local"},
+            "form": {
+                "spec_path": "",
+                "approver": "dashboard@local",
+                "project_key": default_key,
+                "project_path": "",
+            },
         },
     )
 
@@ -97,6 +157,8 @@ async def launch_run(
     request: Request,
     spec_path: str = Form(""),
     approver: str = Form("dashboard@local"),
+    project_key: str = Form(""),
+    project_path: str = Form(""),
     spec_file: UploadFile | None = File(None),
 ) -> Any:
     """Launch a new pipeline run. Uploaded file wins over the dropdown choice."""
@@ -108,6 +170,8 @@ async def launch_run(
             "new_run.html",
             {
                 "specs": _list_specs(),
+                "projects": _list_projects(),
+                "custom_key": CUSTOM_PROJECT_KEY,
                 "settings": {
                     "llm_provider": settings.llm_provider,
                     "plan_model": settings.plan_model,
@@ -116,7 +180,12 @@ async def launch_run(
                     "prompt_version": settings.prompt_version,
                 },
                 "error": message,
-                "form": {"spec_path": spec_path, "approver": approver},
+                "form": {
+                    "spec_path": spec_path,
+                    "approver": approver,
+                    "project_key": project_key,
+                    "project_path": project_path,
+                },
             },
             status_code=400,
         )
@@ -145,8 +214,14 @@ async def launch_run(
     else:
         return _form_error("Pick a spec from the dropdown or upload a file.")
 
+    target_dir, project_error = _resolve_project(project_key, project_path)
+    if project_error or target_dir is None:
+        return _form_error(project_error or "Pick a project.")
+
     try:
-        run_id = runner.launch_run(spec_path=chosen_path, approver=approver)
+        run_id = runner.launch_run(
+            spec_path=chosen_path, approver=approver, target_dir=target_dir,
+        )
     except SpecValidationError as e:
         return _form_error(f"Spec validation failed: {e}")
     except Exception as e:
@@ -166,10 +241,12 @@ def run_detail(request: Request, run_id: str) -> HTMLResponse:
 
     artifacts_dir = Path(run["artifacts_dir"])
     artifacts: list[str] = []
+    artifacts_by_group: list[dict[str, Any]] = []
     if artifacts_dir.exists():
         for p in sorted(artifacts_dir.rglob("*")):
             if p.is_file():
                 artifacts.append(str(p.relative_to(artifacts_dir)))
+        artifacts_by_group = _group_artifacts(artifacts_dir)
 
     plan: dict[str, Any] | None = None
     plan_file = artifacts_dir / "plan.json"
@@ -211,6 +288,7 @@ def run_detail(request: Request, run_id: str) -> HTMLResponse:
             "approvals": approvals,
             "metrics": metrics,
             "artifacts": artifacts,
+            "artifacts_by_group": artifacts_by_group,
             "plan": plan,
             "ac_coverage": ac_coverage,
             "codegen_summary": codegen_summary,
@@ -303,7 +381,97 @@ def _summary_from_json(path: Path) -> dict[str, Any] | None:
     return None
 
 
-WORKFLOW_STEPS = [
+# Ordered list of (group_key, display_label) for the artifact section.
+# Repair groups are spliced in dynamically below.
+_BASE_ARTIFACT_GROUPS = [
+    ("spec",     "Spec"),
+    ("plan",     "Plan"),
+    ("codegen",  "Codegen"),
+    ("testgen",  "Testgen"),
+    ("gates",    "Gates"),
+    ("finalize", "Finalize"),
+    ("metrics",  "Metrics"),
+    ("logs",     "Logs"),
+    ("approvals", "Approvals"),
+    ("other",    "Other"),
+]
+
+
+def _classify_artifact(rel: str) -> str:
+    """Bucket a relative artifact path into one of the workflow groups."""
+    import re
+
+    # Repair attempts get their own bucket per attempt.
+    m = re.match(r"^(?:patches/)?repair_(\d+)", rel)
+    if m:
+        return f"repair_{m.group(1)}"
+    if rel.startswith("spec"):
+        return "spec"
+    if rel == "plan.json":
+        return "plan"
+    if rel.startswith("codegen") or rel == "patches/codegen.patch" or rel == "change_summary.md":
+        return "codegen"
+    if rel.startswith("testgen") or rel == "patches/testgen.patch":
+        return "testgen"
+    if rel.startswith("gate_") or rel == "gates.json" or rel == "ac_coverage.json":
+        return "gates"
+    if rel == "deployment_evidence.json":
+        return "finalize"
+    if rel == "metrics.json":
+        return "metrics"
+    if rel == "prompts.jsonl":
+        return "logs"
+    if rel == "approvals.json":
+        return "approvals"
+    return "other"
+
+
+def _group_artifacts(artifacts_dir: Path) -> list[dict[str, Any]]:
+    """Group every artifact file into an ordered list of sections.
+
+    Each section is `{key, label, items: [{path, mtime}]}`. Items inside a
+    section are ordered by mtime so the natural reading order matches what
+    happened during the run.
+    """
+    buckets: dict[str, list[tuple[str, float]]] = {}
+    for p in artifacts_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(artifacts_dir))
+        key = _classify_artifact(rel)
+        buckets.setdefault(key, []).append((rel, p.stat().st_mtime))
+
+    # Build ordered output. Splice repair_N groups in after "gates" in order.
+    repair_keys = sorted(
+        [k for k in buckets if k.startswith("repair_")],
+        key=lambda k: int(k.split("_", 1)[1]),
+    )
+    ordered_groups: list[tuple[str, str]] = []
+    for key, label in _BASE_ARTIFACT_GROUPS:
+        ordered_groups.append((key, label))
+        if key == "gates":
+            for rk in repair_keys:
+                n = rk.split("_", 1)[1]
+                ordered_groups.append((rk, f"Repair #{n}"))
+
+    out: list[dict[str, Any]] = []
+    for key, label in ordered_groups:
+        items = buckets.get(key) or []
+        if not items:
+            continue
+        items.sort(key=lambda t: t[1])
+        # NB: key is named "files" rather than "items" because Jinja's
+        # `group.items` would resolve to `dict.items` (the method), not the
+        # value at the "items" key.
+        out.append({
+            "key": key,
+            "label": label,
+            "files": [{"path": rel, "mtime": mt} for rel, mt in items],
+        })
+    return out
+
+
+BASE_WORKFLOW_STEPS = [
     ("intake", "Intake", "stage"),
     ("plan", "Plan", "stage"),
     ("approve_plan", "Approve #1", "approval:plan"),
@@ -315,6 +483,43 @@ WORKFLOW_STEPS = [
 ]
 
 
+def _repair_steps_for(stages: list[dict]) -> list[tuple[str, str, str]]:
+    """Build the extra `repair_N` + `gates_after_repair_N` pills for this run.
+
+    Driven by what actually appears in the stages table, so future attempts
+    show up without code changes.
+    """
+    extras: list[tuple[str, str, str]] = []
+    repair_keys = sorted(
+        {s["stage"] for s in stages if s["stage"].startswith("repair_")},
+        key=lambda k: int(k.split("_", 1)[1]) if k.split("_", 1)[1].isdigit() else 0,
+    )
+    for rkey in repair_keys:
+        n = rkey.split("_", 1)[1]
+        extras.append((rkey, f"Repair #{n}", "stage"))
+        gates_key = f"gates_after_{rkey}"
+        if any(s["stage"] == gates_key for s in stages):
+            extras.append((gates_key, f"Gates #{int(n) + 1}", "stage"))
+    return extras
+
+
+def _workflow_steps_for(stages: list[dict]) -> list[tuple[str, str, str]]:
+    """Splice repair / re-gate pills into the base 8-step workflow.
+
+    They appear immediately after the original `gates` pill so the visual
+    grouping is "gates → repair → gates → repair → gates → approve#2".
+    """
+    extras = _repair_steps_for(stages)
+    if not extras:
+        return list(BASE_WORKFLOW_STEPS)
+    out: list[tuple[str, str, str]] = []
+    for step in BASE_WORKFLOW_STEPS:
+        out.append(step)
+        if step[0] == "gates":
+            out.extend(extras)
+    return out
+
+
 def _workflow_status(
     stages: list[dict],
     approvals: list[dict],
@@ -324,7 +529,17 @@ def _workflow_status(
 ) -> list[dict[str, Any]]:
     by_stage = {s["stage"]: s for s in stages}
     approval_by_cp = {a["checkpoint"]: a for a in approvals}
-    any_gate_failed = any(g["status"] == "failed" for g in gates)
+    # gates_after_repair_N is the *latest* truth about gate state, so only
+    # treat the FINAL gates row as failed-with-running-gates rather than every
+    # historic gate row.
+    repair_gate_stages = sorted(
+        (s for s in stages if s["stage"].startswith("gates_after_repair_")),
+        key=lambda s: s["stage"],
+    )
+    final_gate_stage = repair_gate_stages[-1]["stage"] if repair_gate_stages else "gates"
+    any_gate_failed_in_final = any(
+        g["status"] == "failed" for g in gates[-5:]  # last full round of gates
+    )
     current_pending_cp: str | None = None
     if run_status == "awaiting_approval" and current_stage:
         prefix = "approval:"
@@ -334,14 +549,15 @@ def _workflow_status(
                 current_pending_cp = cp
 
     out: list[dict[str, Any]] = []
-    for key, label, kind in WORKFLOW_STEPS:
+    for key, label, kind in _workflow_steps_for(stages):
         if kind == "stage":
             row = by_stage.get(key)
             if row:
                 status = row["status"]
-                # The gates stage row says "succeeded" if the runner finished,
-                # even when individual gates failed. Surface the real outcome.
-                if key == "gates" and status == "succeeded" and any_gate_failed:
+                # A gates / gates_after_repair_N row says "succeeded" if the
+                # runner finished. Surface the real outcome by checking the
+                # individual gate_results for the FINAL gates round.
+                if key == final_gate_stage and status == "succeeded" and any_gate_failed_in_final:
                     status = "failed"
             elif key == "intake":
                 # Intake runs before the audit row exists, so it never gets a
@@ -364,6 +580,10 @@ def _workflow_status(
                 status = "pending"
         out.append({"key": key, "label": label, "status": status})
     return out
+
+
+# Keep the old name as an alias for any external importers.
+WORKFLOW_STEPS = BASE_WORKFLOW_STEPS
 
 
 @app.get("/runs/{run_id}/state.json")
@@ -433,6 +653,123 @@ def run_state(run_id: str) -> JSONResponse:
         "artifact_count": artifact_count,
         "structural_signature": signature,
     })
+
+
+@app.get("/runs/{run_id}/timeline", response_class=HTMLResponse)
+def run_timeline_page(request: Request, run_id: str) -> HTMLResponse:
+    store = _store()
+    run = _run_or_404(store, run_id)
+    events = _merged_timeline(store, run)
+    return templates.TemplateResponse(
+        request, "run_timeline.html",
+        {"run": run, "events": events, "event_count": len(events)},
+    )
+
+
+@app.get("/runs/{run_id}/timeline.json")
+def run_timeline_json(run_id: str) -> JSONResponse:
+    store = _store()
+    run = _run_or_404(store, run_id)
+    return JSONResponse({"events": _merged_timeline(store, run)})
+
+
+def _merged_timeline(store: AuditStore, run: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten every audit row for ``run`` into a single chronologically-sorted
+    list of events. Reuses the same data the per-section view consumes; no new
+    persistence layer.
+    """
+    run_id = run["run_id"]
+    stages = store.stages_for_run(run_id)
+    gates = store.gates_for_run(run_id)
+    approvals = store.approvals_for_run(run_id)
+    prompts = store.prompt_calls_for_run(run_id)
+
+    events: list[dict[str, Any]] = []
+
+    # Stage start events. We synthesise a virtual "intake" event at the run's
+    # started_at so the timeline doesn't have a mysterious gap before "plan".
+    events.append({
+        "ts": run["started_at"],
+        "kind": "stage_start",
+        "label": "intake",
+        "status": "succeeded",
+        "detail": f"spec={run['spec_name']} model={run['llm_model']}",
+        "anchor": "stage-intake",
+    })
+
+    for s in stages:
+        events.append({
+            "ts": s["started_at"],
+            "kind": "stage_start",
+            "label": s["stage"],
+            "status": "running",
+            "detail": "",
+            "anchor": f"stage-{s['stage']}",
+        })
+        if s.get("ended_at"):
+            events.append({
+                "ts": s["ended_at"],
+                "kind": "stage_end",
+                "label": s["stage"],
+                "status": s["status"],
+                "detail": (s.get("duration_ms") and f"{s['duration_ms']} ms") or "",
+                "anchor": f"stage-{s['stage']}",
+                "error": s.get("error"),
+            })
+
+    for g in gates:
+        events.append({
+            "ts": g["created_at"],
+            "kind": "gate",
+            "label": f"gate: {g['gate']}",
+            "status": g["status"],
+            "detail": g.get("summary") or "",
+            "anchor": None,
+            "artifact_path": g.get("artifact_path"),
+        })
+
+    for a in approvals:
+        events.append({
+            "ts": a["created_at"],
+            "kind": "approval",
+            "label": f"approve #{a['checkpoint']}",
+            "status": a["decision"],
+            "detail": f"by {a['approver']}" + (f" — {a['comment']}" if a.get("comment") else ""),
+            "anchor": None,
+        })
+
+    for p in prompts:
+        events.append({
+            "ts": p["created_at"],
+            "kind": "llm_call",
+            "label": p["stage"],
+            "status": "running",
+            "detail": (
+                f"{p['provider']}/{p['model']} · "
+                f"{p['input_tokens'] or 0}→{p['output_tokens'] or 0} tok · "
+                f"{p['latency_ms'] or 0} ms"
+            ),
+            "anchor": f"stage-{p['stage'].split('.', 1)[0]}",
+        })
+
+    # ISO-8601 strings sort lexicographically. Within a tied timestamp, push
+    # stage_starts before everything else, stage_ends last; gives a tidier
+    # visual when multiple events share a second-resolution timestamp.
+    KIND_ORDER = {"stage_start": 0, "llm_call": 1, "gate": 2, "approval": 3, "stage_end": 4}
+    events.sort(key=lambda e: (e["ts"], KIND_ORDER.get(e["kind"], 9)))
+
+    # Final virtual event when the run is terminal.
+    if run.get("ended_at") and run["status"] in {"succeeded", "failed", "rejected"}:
+        events.append({
+            "ts": run["ended_at"],
+            "kind": "run_end",
+            "label": f"run {run['status']}",
+            "status": run["status"],
+            "detail": "",
+            "anchor": None,
+        })
+
+    return events
 
 
 @app.get("/runs/{run_id}/artifact", response_class=PlainTextResponse)

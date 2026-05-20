@@ -8,7 +8,7 @@
      data-is-live="{{ 'true' if is_live else 'false' }}"></div>
 
 <p><a href="/">&larr; All runs</a></p>
-<h2>Run <code>{{ run.run_id }}</code></h2>
+<h2>Run <code>{{ run.run_id }}</code> <a class="page-nav-link" href="/runs/{{ run.run_id }}/timeline">Timeline view &rarr;</a></h2>
 
 <section class="grid">
     <div class="card">
@@ -20,6 +20,14 @@
         </p>
         <p>Stage: <code id="run-current-stage">{{ run.current_stage or '-' }}</code></p>
         <p>Spec: <code>{{ run.spec_name }}</code> · hash <code>{{ run.spec_hash[:12] }}</code></p>
+        <p>Project:
+            {% if run.target_dir %}
+                <code title="{{ run.target_dir }}">{{ run.target_dir.rsplit('/', 1)[-1] }}</code>
+                <span class="muted small">({{ run.target_dir }})</span>
+            {% else %}
+                <span class="muted">(unknown)</span>
+            {% endif %}
+        </p>
         <p>Provider: <code>{{ run.llm_provider }}</code> · model <code>{{ run.llm_model }}</code> · prompts <code>{{ run.prompt_version }}</code></p>
     </div>
     <div class="card" id="metrics-card">
@@ -187,15 +195,27 @@
     </tbody>
 </table>
 
-{# ---------- Artifact list ---------- #}
+{# ---------- Artifacts, grouped by stage ---------- #}
 <h3>Artifacts</h3>
-<ul class="artifacts">
-    {% for a in artifacts %}
-    <li><a href="/runs/{{ run.run_id }}/artifact?path={{ a }}">{{ a }}</a></li>
-    {% else %}
-    <li class="muted">No artifacts yet.</li>
+{% if artifacts_by_group %}
+<div class="artifact-groups">
+    {% for group in artifacts_by_group %}
+    <details class="artifact-group" data-key="{{ group.key }}" {% if loop.first %}open{% endif %}>
+        <summary>
+            <span class="artifact-group-label">{{ group.label }}</span>
+            <span class="muted">{{ group.files|length }} file{{ '' if group.files|length == 1 else 's' }}</span>
+        </summary>
+        <ul class="artifacts">
+            {% for item in group.files %}
+            <li><a href="/runs/{{ run.run_id }}/artifact?path={{ item.path }}">{{ item.path }}</a></li>
+            {% endfor %}
+        </ul>
+    </details>
     {% endfor %}
-</ul>
+</div>
+{% else %}
+<p class="muted">No artifacts yet.</p>
+{% endif %}
 
 <script>
 // =============================================================================
@@ -382,8 +402,101 @@
 })();
 
 // =============================================================================
-// Lazy-load prompts.jsonl entries when a stage's <details> is opened
+// Lazy-load prompts.jsonl entries when a stage's <details> is opened.
+//
+// Two shapes coexist in prompts.jsonl:
+//
+//   1. Single-shot (plan / testgen): one record with `system`, `prompt`,
+//      `response_text`. No `kind` field, no `turn`.
+//   2. Tool-using agent (codegen / repair_N): one `kind=agent_turn` record per
+//      turn (with assistant_text + tool_uses[]), followed by one
+//      `kind=tool_result` record per tool call (matched by tool_use_id).
+//
+// The renderer detects the shape per stage and lays out either the legacy
+// system/user/response panels OR a multi-turn timeline of tool calls.
 // =============================================================================
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+function prettyJson(obj) {
+    try { return JSON.stringify(obj, null, 2); } catch (_) { return String(obj); }
+}
+
+function renderSingleShot(entries) {
+    return entries.map((e, i) => `
+        <div class="prompt-entry">
+            <p><strong>Call ${i + 1}</strong> ·
+               <code>${escapeHtml(e.provider)}/${escapeHtml(e.model)}</code> ·
+               ${e.usage?.input_tokens ?? '?'} in / ${e.usage?.output_tokens ?? '?'} out ·
+               ${e.latency_ms} ms</p>
+            <details><summary>System prompt</summary><pre>${escapeHtml(e.system)}</pre></details>
+            <details><summary>User prompt</summary><pre>${escapeHtml(e.prompt)}</pre></details>
+            <details open><summary>Response</summary><pre>${escapeHtml(e.response_text)}</pre></details>
+        </div>`).join('');
+}
+
+function renderToolUse(tu, result) {
+    const inputJson = prettyJson(tu.input);
+    let resultHtml = '<em class="muted">no tool_result recorded</em>';
+    if (result) {
+        const errCls = result.is_error ? ' is-error' : '';
+        const truncNote = result.content_truncated
+            ? `<p class="muted">truncated · full length ${result.content_bytes} bytes</p>` : '';
+        resultHtml = `
+            <div class="tool-result${errCls}">
+                <div class="tool-result-label">${result.is_error ? '✗ error' : '→ result'}</div>
+                <pre>${escapeHtml(result.content_preview)}</pre>
+                ${truncNote}
+            </div>`;
+    }
+    return `
+        <div class="tool-call">
+            <div class="tool-call-head">
+                <span class="tool-chip tool-${escapeHtml(tu.name)}">${escapeHtml(tu.name)}</span>
+                <code class="muted">${escapeHtml(tu.id)}</code>
+            </div>
+            <div class="tool-input">
+                <div class="tool-input-label">input</div>
+                <pre>${escapeHtml(inputJson)}</pre>
+            </div>
+            ${resultHtml}
+        </div>`;
+}
+
+function renderAgentTurns(entries) {
+    // Group by turn. Each group has one agent_turn entry and N tool_result entries.
+    const turns = new Map();
+    for (const e of entries) {
+        const turn = e.turn ?? 0;
+        if (!turns.has(turn)) turns.set(turn, { turn_record: null, results: [] });
+        if (e.kind === 'agent_turn') turns.get(turn).turn_record = e;
+        else if (e.kind === 'tool_result') turns.get(turn).results.push(e);
+    }
+    const ordered = [...turns.entries()].sort((a, b) => a[0] - b[0]);
+    return ordered.map(([turnIdx, group]) => {
+        const tr = group.turn_record;
+        if (!tr) return '';
+        const resultById = Object.fromEntries(group.results.map(r => [r.tool_use_id, r]));
+        const tuHtml = (tr.tool_uses || []).map(tu => renderToolUse(tu, resultById[tu.id])).join('');
+        const assistantBlock = tr.assistant_text
+            ? `<div class="turn-assistant"><div class="turn-label">assistant</div><pre>${escapeHtml(tr.assistant_text)}</pre></div>`
+            : '';
+        const stop = tr.stop_reason ? `<span class="muted">stop: ${escapeHtml(tr.stop_reason)}</span>` : '';
+        return `
+            <section class="turn">
+                <header class="turn-header">
+                    <strong>Turn ${turnIdx}</strong>
+                    <code>${escapeHtml(tr.provider)}/${escapeHtml(tr.model)}</code>
+                    <span class="muted">${tr.usage?.input_tokens ?? '?'} in / ${tr.usage?.output_tokens ?? '?'} out · ${tr.latency_ms ?? '?'} ms</span>
+                    ${stop}
+                </header>
+                ${assistantBlock}
+                <div class="tool-calls">${tuHtml}</div>
+            </section>`;
+    }).join('');
+}
+
 document.querySelectorAll('.prompt-panel').forEach(panel => {
     panel.addEventListener('toggle', async () => {
         if (!panel.open || panel.dataset.loaded === '1') return;
@@ -396,16 +509,8 @@ document.querySelectorAll('.prompt-panel').forEach(panel => {
             if (!data.entries.length) {
                 body.innerHTML = '<em>No LLM call recorded for this stage.</em>';
             } else {
-                body.innerHTML = data.entries.map((e, i) => `
-                    <div class="prompt-entry">
-                        <p><strong>Call ${i + 1}</strong> ·
-                           <code>${e.provider}/${e.model}</code> ·
-                           ${e.usage?.input_tokens ?? '?'} in / ${e.usage?.output_tokens ?? '?'} out ·
-                           ${e.latency_ms} ms</p>
-                        <details><summary>System prompt</summary><pre>${escapeHtml(e.system)}</pre></details>
-                        <details><summary>User prompt</summary><pre>${escapeHtml(e.prompt)}</pre></details>
-                        <details open><summary>Response</summary><pre>${escapeHtml(e.response_text)}</pre></details>
-                    </div>`).join('');
+                const isAgent = data.entries.some(e => e.kind === 'agent_turn' || e.kind === 'tool_result');
+                body.innerHTML = isAgent ? renderAgentTurns(data.entries) : renderSingleShot(data.entries);
             }
             panel.dataset.loaded = '1';
         } catch (err) {
@@ -413,9 +518,5 @@ document.querySelectorAll('.prompt-panel').forEach(panel => {
         }
     });
 });
-function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c =>
-        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
-}
 </script>
 {% endblock %}

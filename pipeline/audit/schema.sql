@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS runs (
     approver          TEXT,
     started_at        TEXT NOT NULL,
     ended_at          TEXT,
-    artifacts_dir     TEXT NOT NULL
+    artifacts_dir     TEXT NOT NULL,
+    target_dir        TEXT             -- nullable: NULL for runs from before this column existed
 );
 
 CREATE TABLE IF NOT EXISTS stages (

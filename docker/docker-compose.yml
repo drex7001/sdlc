@@ -12,7 +12,7 @@ services:
       # Persist runs + audit DB on the host so dashboard survives restarts.
       - ../runs:/app/runs
       - ../audit.db:/app/audit.db
-      - ../sample-target:/app/sample-target
+      - ../targets:/app/targets
       # Dashboard launches pipeline runs in-process; needs specs/ to list
       # existing specs and to write uploaded ones.
       - ../specs:/app/specs
@@ -30,7 +30,7 @@ services:
     volumes:
       - ../runs:/app/runs
       - ../audit.db:/app/audit.db
-      - ../sample-target:/app/sample-target
+      - ../targets:/app/targets
       - ../specs:/app/specs
     env_file:
       - ../.env

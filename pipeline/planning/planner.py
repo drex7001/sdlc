@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -112,6 +113,7 @@ def plan_from_spec(
     except (json.JSONDecodeError, ValidationError, ValueError) as e:
         raise ValueError(f"planning output invalid: {e}") from e
 
+    plan = _apply_plan_guardrails(target_dir, plan)
     audit.write_json_artifact(run, "plan.json", plan.model_dump())
     return plan
 
@@ -119,3 +121,61 @@ def plan_from_spec(
 def gather_plan_context(target_dir: Path, plan: Plan) -> dict[str, str]:
     """Existing file contents the codegen agent needs as context."""
     return _read_existing(target_dir, plan.impacted_files)
+
+
+def _apply_plan_guardrails(target_dir: Path, plan: Plan) -> Plan:
+    missing_imports = _missing_local_import_targets(target_dir, plan.impacted_files)
+    new_impacted = list(plan.impacted_files)
+    for rel in sorted(missing_imports):
+        if rel not in plan.impacted_set():
+            new_impacted.append(rel)
+    if new_impacted == plan.impacted_files:
+        return plan
+    return plan.model_copy(update={"impacted_files": new_impacted})
+
+
+def _missing_local_import_targets(target_dir: Path, rel_files: list[str]) -> set[str]:
+    src_dir = target_dir / "src"
+    packages = _local_package_names(src_dir)
+    if not packages:
+        return set()
+
+    missing: set[str] = set()
+    for rel in rel_files:
+        path = target_dir / rel
+        if not path.is_file() or path.suffix != ".py":
+            continue
+        for module in _imported_modules(path.read_text(encoding="utf-8")):
+            parts = module.split(".")
+            if len(parts) < 2 or parts[0] not in packages:
+                continue
+            module_file = src_dir.joinpath(*parts).with_suffix(".py")
+            package_init = src_dir.joinpath(*parts, "__init__.py")
+            if not module_file.exists() and not package_init.exists():
+                missing.add(str(module_file.relative_to(target_dir)))
+    return missing
+
+
+def _local_package_names(src_dir: Path) -> set[str]:
+    if not src_dir.is_dir():
+        return set()
+    return {
+        child.name
+        for child in src_dir.iterdir()
+        if child.is_dir() and (child / "__init__.py").is_file()
+    }
+
+
+def _imported_modules(source: str) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            modules.add(node.module)
+        elif isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+    return modules

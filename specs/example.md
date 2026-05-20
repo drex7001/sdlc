@@ -20,7 +20,7 @@ As an operator, I want a public /status endpoint that returns liveness and uptim
 
 ## Non-functional Requirements
 - Response time under 50ms at p95 for the happy path.
-- No external dependencies beyond the existing sample-target requirements.
+- No external dependencies beyond the existing flask-status target requirements.
 
 ## Out of Scope
 - Persistent rate-limit storage across restarts.

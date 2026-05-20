@@ -1,30 +1,26 @@
-"""Codegen stage: plan + spec → file operations via LLM."""
+"""Codegen stage: plan + spec → file operations via a tool-using LLM agent.
+
+The agent is given ``list_files``, ``read_file``, and ``write_files`` tools
+(see :mod:`.agent_tools`). It runs in a multi-turn loop bounded by
+``PIPELINE_MAX_AGENT_TURNS`` and terminates when it calls ``write_files``
+with paths cleared by the sandbox.
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import Literal
-
-from pydantic import BaseModel, Field, ValidationError
 
 from ..audit import AuditStore, RunRecord
 from ..intake import FeatureSpec
 from ..llm import LLMClient, load_prompt
 from ..planning import Plan, gather_plan_context
-from ..planning.planner import _extract_json, _list_tree
-from .sandbox import validate_paths
+from ..planning.planner import _list_tree
+from .agent_tools import CODEGEN_TOOLS, AgentLoopError, ToolLoop
+from .codegen_schema import FileChange, GeneratedChanges
 
-
-class FileChange(BaseModel):
-    path: str
-    action: Literal["create", "modify", "delete"]
-    content: str = ""
-
-
-class GeneratedChanges(BaseModel):
-    files: list[FileChange] = Field(min_length=1)
-    summary: str
+__all__ = ["FileChange", "GeneratedChanges", "generate_code"]
 
 
 def generate_code(
@@ -40,7 +36,7 @@ def generate_code(
     audit: AuditStore,
     max_tokens: int = 8192,
 ) -> GeneratedChanges:
-    system = load_prompt(prompts_dir, prompt_version, "codegen")
+    system = load_prompt(prompts_dir, prompt_version, "codegen_agent")
     user_prompt = json.dumps(
         {
             "spec": spec.model_dump(),
@@ -51,31 +47,41 @@ def generate_code(
         indent=2,
     )
 
-    response = llm.complete(
-        system=system, prompt=user_prompt, model=model,
-        temperature=0.1, max_tokens=max_tokens,
+    loop = ToolLoop(
+        llm=llm,
+        model=model,
+        system_prompt=system,
+        tools=CODEGEN_TOOLS,
+        target_dir=target_dir,
+        allowed_paths=plan.impacted_set(),
+        audit=audit,
+        run=run,
+        stage_label="codegen",
+        max_tokens=max_tokens,
+        max_turns=_max_turns(),
     )
-    audit.record_prompt(run, stage="codegen", system=system, prompt=user_prompt, response=response)
 
     try:
-        raw = _extract_json(response.text)
-        changes = GeneratedChanges.model_validate(raw)
-    except (ValueError, ValidationError) as e:
-        raise ValueError(f"codegen output invalid: {e}") from e
+        result = loop.run_loop(initial_user_message=user_prompt)
+    except AgentLoopError as e:
+        raise ValueError(f"codegen agent failed: {e}") from e
 
-    # Governance check: every path must be in plan.impacted_files.
-    validate_paths(
-        paths=[fc.path for fc in changes.files],
-        allowed=plan.impacted_set(),
-        target_dir=target_dir,
-    )
-
+    changes = result.changes
     audit.write_json_artifact(
         run,
         "codegen_output.json",
         {
             "summary": changes.summary,
+            "turns": result.turns,
+            "tool_calls": result.tool_calls,
             "files": [{"path": f.path, "action": f.action} for f in changes.files],
         },
     )
     return changes
+
+
+def _max_turns() -> int:
+    try:
+        return max(1, int(os.environ.get("PIPELINE_MAX_AGENT_TURNS", "12")))
+    except ValueError:
+        return 12

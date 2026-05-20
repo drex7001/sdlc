@@ -53,6 +53,11 @@ class AuditStore:
     def _ensure_schema(self) -> None:
         with self._connect() as con:
             con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            # Idempotent migration: ADD COLUMN on pre-existing DBs that were
+            # created before target_dir was part of the schema.
+            existing = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
+            if "target_dir" not in existing:
+                con.execute("ALTER TABLE runs ADD COLUMN target_dir TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.db_path)
@@ -72,6 +77,7 @@ class AuditStore:
         llm_model: str,
         prompt_version: str,
         approver: str,
+        target_dir: Path,
     ) -> RunRecord:
         run_id = f"{dt.datetime.now(dt.UTC):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
         artifacts_dir = self.runs_dir / run_id
@@ -81,12 +87,12 @@ class AuditStore:
             con.execute(
                 """INSERT INTO runs(run_id, spec_name, spec_hash, spec_source_path,
                        llm_provider, llm_model, prompt_version, status, approver,
-                       started_at, artifacts_dir)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)""",
+                       started_at, artifacts_dir, target_dir)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)""",
                 (
                     run_id, spec_name, spec_hash, str(spec_source_path),
                     llm_provider, llm_model, prompt_version, approver,
-                    _utc_now(), str(artifacts_dir),
+                    _utc_now(), str(artifacts_dir), str(target_dir),
                 ),
             )
         return RunRecord(
@@ -189,6 +195,14 @@ class AuditStore:
                 ),
             )
         return jsonl
+
+    def prompt_calls_for_run(self, run_id: str) -> list[dict[str, Any]]:
+        """LLM call summary rows for ``run_id``, ordered by id (== insertion order)."""
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT * FROM prompt_calls WHERE run_id=? ORDER BY id", (run_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # --- approvals -----------------------------------------------------------
 

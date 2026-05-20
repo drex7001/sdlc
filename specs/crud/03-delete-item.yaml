@@ -1,0 +1,31 @@
+name: crud-delete-item
+objective: >
+  Add DELETE /items/{id} to remove an item from the in-memory store. Returns
+  204 on success and 404 when the id is unknown. Closes the basic CRUD set
+  for this target.
+user_story: >
+  As an API consumer, I want to DELETE /items/{id} to drop a record I no
+  longer need, and I want a clear 404 when I ask the server to delete
+  something that does not exist, so my client can surface that distinctly
+  from a transient network error.
+business_rules:
+  - 'DELETE /items/{id} removes the item with that id from the store and returns HTTP 204 with no body.'
+  - 'DELETE /items/{id} for an id that is not present returns HTTP 404 with body {"detail": "item not found"}.'
+  - After a successful DELETE, a subsequent GET /items must not include the deleted item.
+  - DELETE is idempotent only in the sense that the SECOND delete returns 404 (the resource is gone, not "already deleted = success").
+  - Ids are not reused after deletion. If items 1,2,3 exist and 2 is deleted, the next created item has id 4.
+acceptance_criteria:
+  - id: AC-1
+    description: 'After POST /items {"name":"x"}, DELETE /items/1 returns HTTP 204 with an empty body.'
+  - id: AC-2
+    description: 'DELETE /items/999 on an unknown id returns HTTP 404 and body {"detail":"item not found"}.'
+  - id: AC-3
+    description: 'After deleting item 2 of three, GET /items returns only items 1 and 3 (in that order).'
+  - id: AC-4
+    description: 'After deleting an item and then creating a new one, the new item has an id strictly greater than every id ever issued before — ids are never reused.'
+non_functional:
+  - Continue using the same in-memory store.
+  - No external dependencies beyond the existing crud-api target requirements.
+out_of_scope:
+  - PUT/PATCH (item update is not in this MVP series).
+  - Soft delete / undo.

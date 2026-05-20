@@ -18,6 +18,7 @@ from .config import Settings
 from .gates import GateReport, run_gates
 from .gates.pytest_gate import compute_ac_coverage
 from .implementation import GeneratedChanges, apply_changes, generate_code
+from .implementation.repair import run_repair_agent
 from .intake import FeatureSpec, SpecValidationError, load_and_validate
 from .llm import LLMClient, build_client
 from .metrics import MetricsRecorder
@@ -36,6 +37,7 @@ class RunResult:
     impl_changes: GeneratedChanges | None = None
     test_changes: GeneratedChanges | None = None
     gate_report: GateReport | None = None
+    repair_attempts: int = 0
     error: str | None = None
     metrics: dict[str, Any] | None = None
 
@@ -77,6 +79,7 @@ def run_pipeline(
         llm_model=settings.llm_model,
         prompt_version=settings.prompt_version,
         approver=settings.approver,
+        target_dir=settings.target_dir,
     )
     audit.write_json_artifact(run, "spec.json", spec.model_dump())
     shutil.copy(spec_path, run.artifacts_dir / f"spec_source{spec_path.suffix}")
@@ -159,6 +162,53 @@ def run_pipeline(
             ),
         )
         result.gate_report = gate_report
+
+        # --- 6b. Repair loop ----------------------------------------------
+        # When gates fail, drive a tool-using agent to inspect the failing
+        # logs and propose minimal fixes (bounded by the plan sandbox). Try
+        # up to ``settings.max_repair_attempts`` times, re-running gates
+        # after each successful re-apply.
+        for attempt in range(1, settings.max_repair_attempts + 1):
+            if gate_report.all_passed:
+                break
+            stage_label = f"repair_{attempt}"
+
+            def _repair_and_apply(
+                _attempt: int = attempt,
+                _label: str = stage_label,
+                _failing_report: GateReport = gate_report,
+            ) -> GeneratedChanges:
+                fixes = run_repair_agent(
+                    spec=spec, plan=plan,
+                    impl_summary=impl_changes.summary,
+                    test_summary=test_changes.summary,
+                    gate_report=_failing_report,
+                    target_dir=settings.target_dir, llm=llm,
+                    model=settings.codegen_model, prompts_dir=settings.prompts_dir,
+                    prompt_version=settings.prompt_version, run=run, audit=audit,
+                    attempt=_attempt, max_tokens=settings.max_tokens,
+                )
+                apply_changes(
+                    changes=fixes, target_dir=settings.target_dir,
+                    run=run, audit=audit, kind=_label,
+                )
+                return fixes
+
+            _stage(audit, run, stage_label, metrics, _repair_and_apply)
+            result.repair_attempts = attempt
+
+            # Re-run gates after the repair. Each attempt's gate results get
+            # their own rows; the run-level gate_report tracks the latest.
+            gate_report = _stage(
+                audit, run, f"gates_after_{stage_label}", metrics,
+                lambda: run_gates(
+                    target_dir=settings.target_dir, plan=plan,
+                    impl_changes=impl_changes, test_changes=test_changes,
+                    run=run, audit=audit,
+                ),
+            )
+            result.gate_report = gate_report
+
         metrics.gates(gate_report.passed_count, gate_report.total)
 
         ac_coverage = compute_ac_coverage(
@@ -171,7 +221,9 @@ def run_pipeline(
 
         if not gate_report.all_passed:
             failed = [o.name for o in gate_report.outcomes if not o.passed]
-            raise PipelineError(f"gates failed: {failed}")
+            raise PipelineError(
+                f"gates failed after {result.repair_attempts} repair attempt(s): {failed}"
+            )
 
         # --- 7. Approval #2 ----------------------------------------------
         request_approval(

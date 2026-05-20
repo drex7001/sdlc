@@ -1,0 +1,31 @@
+name: crud-create-item
+objective: >
+  Add a POST /items endpoint to the FastAPI CRUD baseline so clients can create
+  named items and get back the persisted record. State is in-memory; we will
+  layer the rest of CRUD (list, delete) in later specs.
+user_story: >
+  As an API consumer, I want to POST a JSON body with a name (and optional
+  description) and receive a 201 with the created item, including the
+  server-assigned id, so that I can start tracking items in the system.
+business_rules:
+  - 'POST /items accepts a JSON body {"name": str, "description": str | null}.'
+  - 'Successful creation returns HTTP 201 with body {"id": int, "name": str, "description": str | null}.'
+  - The server assigns ids monotonically starting at 1. The first item created has id=1.
+  - Missing or empty name returns HTTP 422 (FastAPI default validation behaviour is acceptable).
+  - State is kept in-memory in a process-local store; no persistence is required.
+acceptance_criteria:
+  - id: AC-1
+    description: 'POST /items with {"name":"widget"} returns 201 and a JSON body containing the same name and a positive integer id.'
+  - id: AC-2
+    description: 'POST /items with {"name":"a"} then {"name":"b"} yields ids 1 and 2 in that order.'
+  - id: AC-3
+    description: 'POST /items with a missing name field returns HTTP 422.'
+  - id: AC-4
+    description: 'POST /items with {"name":"x","description":"hello"} echoes the description back in the response body.'
+non_functional:
+  - Use FastAPI's pydantic models for request/response validation.
+  - No external dependencies beyond the existing crud-api target requirements.
+out_of_scope:
+  - GET / DELETE endpoints (covered by later specs in the series).
+  - Persistence across restarts.
+  - Authentication / authorization.

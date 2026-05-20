@@ -28,6 +28,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env", override=False)
 
 
+def _int_env(name: str, default: int, *, low: int, high: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
 # Provider-aware default models. These are sensible balanced choices; override
 # per stage via env vars to optimise cost vs quality.
 _DEFAULT_MODELS = {
@@ -66,6 +77,7 @@ class Settings:
     prompts_dir: Path
     prompt_version: str
     approver: str
+    max_repair_attempts: int
 
     @classmethod
     def load(cls) -> Settings:
@@ -81,10 +93,11 @@ class Settings:
             max_tokens=int(os.environ.get("PIPELINE_MAX_TOKENS", "8192")),
             runs_dir=Path(os.environ.get("PIPELINE_RUNS_DIR", REPO_ROOT / "runs")),
             audit_db=Path(os.environ.get("PIPELINE_AUDIT_DB", REPO_ROOT / "audit.db")),
-            target_dir=Path(os.environ.get("PIPELINE_TARGET_DIR", REPO_ROOT / "sample-target")),
+            target_dir=Path(os.environ.get("PIPELINE_TARGET_DIR", REPO_ROOT / "targets" / "flask-status")),
             prompts_dir=REPO_ROOT / "pipeline" / "llm" / "prompts",
             prompt_version=os.environ.get("PIPELINE_PROMPT_VERSION", "v1"),
             approver=os.environ.get("APPROVER", "unknown@local"),
+            max_repair_attempts=_int_env("PIPELINE_MAX_REPAIR_ATTEMPTS", 2, low=0, high=5),
         )
 
     def model_for(self, stage: str) -> str:

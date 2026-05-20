@@ -68,7 +68,7 @@ Prompts live under `pipeline/llm/prompts/v1/`. The version used by a run is reco
 
 ## Limitations
 
-- **No retry / repair loop.** When a gate fails the pipeline halts. A natural next step is to feed gate failures back into the LLM for one repair attempt before halting.
+- **Repair loop is bounded and sandbox-scoped.** Up to `PIPELINE_MAX_REPAIR_ATTEMPTS` (default 2) repair attempts are made after gate failure (see `pipeline/implementation/repair.py`). The repair agent shares the same sandbox as codegen — if the real fix is outside `plan.impacted_files`, it cannot escape, and the run still halts. That's by design; the alternative widens the blast radius.
 - **Approval is single-reviewer.** Production governance needs N-of-M, role-based approval and per-environment policies.
 - **Dashboard has no auth.** Anyone who can reach the host can approve.
 - **Sandbox is path-level, not capability-level.** Generated code can still do anything within an approved file. A production version would also sandbox imports/syscalls (e.g. via `RestrictedPython`, a subinterpreter, or a containerised executor).
@@ -78,8 +78,8 @@ Prompts live under `pipeline/llm/prompts/v1/`. The version used by a run is reco
 
 ## Future improvements
 
-1. **Self-healing loop.** On gate failure, send the failure log + failing file back to the LLM for a single repair attempt, capped at one retry per gate. The audit trail already supports this — it just needs an orchestrator branch.
-2. **Multi-agent orchestration.** Split planner / coder / tester / reviewer into named agents with explicit handoffs. The current sequential orchestrator is the natural starting point.
+1. **Multi-agent orchestration.** Split planner / coder / tester / reviewer into named agents with explicit handoffs. The current sequential orchestrator is the natural starting point.
+2. **Tool-using planner / testgen.** Codegen and repair already drive a multi-turn Anthropic `tool_use` loop via `pipeline/implementation/agent_tools.py`. Planning and testgen are still single-shot — promoting them would let the planner explore the repo before committing to `impacted_files`.
 3. **Eval harness.** A `bench/` directory with N golden specs, expected gate outcomes, and a `pipeline bench` command that scores each prompt version.
 4. **Spec → diff cost estimation.** Static analysis of `plan.impacted_files` could predict cost (LOC churn, blast radius) and require higher approval for large changes.
 5. **Real-time dashboard updates.** Replace polling with Server-Sent Events from the orchestrator.

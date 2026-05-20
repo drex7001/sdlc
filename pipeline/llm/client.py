@@ -1,9 +1,17 @@
 """Provider-pluggable LLM client.
 
-The interface intentionally exposes a single ``complete()`` call. Providers
-translate it to whatever their native SDK requires. All requests/responses are
-returned in a normalised LLMResponse so the audit layer can persist them
-identically regardless of provider.
+Two call shapes are exposed:
+
+* ``complete()`` — single-shot, returns one text response. Used by planning and
+  testgen, which still produce a single JSON document.
+* ``complete_with_tools()`` — multi-turn tool-use loop driver. The caller owns
+  the conversation; this method just executes one turn of "send messages, get
+  next assistant block (which may include tool_use blocks)". Used by codegen
+  and the repair loop via the ``ToolLoop`` driver in
+  ``pipeline.implementation.agent_tools``.
+
+All requests/responses return a normalised :class:`LLMResponse` so the audit
+layer persists them identically regardless of provider.
 """
 
 from __future__ import annotations
@@ -14,6 +22,15 @@ from typing import Any, Protocol
 
 
 @dataclass
+class ToolUse:
+    """One tool invocation the model has emitted."""
+
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass
 class LLMResponse:
     text: str
     model: str
@@ -21,6 +38,12 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     latency_ms: int = 0
+    stop_reason: str | None = None
+    # Tool calls emitted by the model in this turn (empty list when none).
+    tool_uses: list[ToolUse] = field(default_factory=list)
+    # Provider-shape assistant content blocks (text + tool_use), used by the
+    # tool-loop driver to feed the message back into the next turn verbatim.
+    assistant_content: list[dict[str, Any]] = field(default_factory=list)
 
 
 class LLMClient(Protocol):
@@ -33,6 +56,17 @@ class LLMClient(Protocol):
         *,
         system: str,
         prompt: str,
+        model: str,
+        temperature: float = 0.2,
+        max_tokens: int = 8192,
+    ) -> LLMResponse: ...
+
+    def complete_with_tools(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
         model: str,
         temperature: float = 0.2,
         max_tokens: int = 8192,

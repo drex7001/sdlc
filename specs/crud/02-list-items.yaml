@@ -1,0 +1,29 @@
+name: crud-list-items
+objective: >
+  Add a GET /items endpoint that returns every item previously created via
+  POST /items. Builds directly on the in-memory store introduced by
+  crud-create-item.
+user_story: >
+  As an API consumer, after creating items I want to GET /items and receive
+  an array of every record currently in the store, in insertion order, so
+  that I can render a list view in my client.
+business_rules:
+  - 'GET /items returns HTTP 200 with body {"items": [<item>, ...]}.'
+  - Items are returned in insertion order (oldest first).
+  - 'When the store is empty the response is HTTP 200 with body {"items": []}.'
+  - Each item in the response has the same shape as the body returned by POST /items (id, name, description).
+acceptance_criteria:
+  - id: AC-1
+    description: 'GET /items on an empty store returns HTTP 200 and body {"items": []}.'
+  - id: AC-2
+    description: 'After three POST /items calls, GET /items returns 200 and the items array has length 3.'
+  - id: AC-3
+    description: 'GET /items returns the items in insertion order — the first POSTed item is first in the array.'
+  - id: AC-4
+    description: 'Every item in the GET /items response carries the id, name and description originally POSTed.'
+non_functional:
+  - Use the same in-memory store the create endpoint introduced.
+  - No external dependencies beyond the existing crud-api target requirements.
+out_of_scope:
+  - Filtering, pagination, or sorting beyond insertion order.
+  - DELETE endpoint (covered by the next spec in the series).
