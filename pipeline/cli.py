@@ -148,6 +148,15 @@ def approve_cmd(
     if not run:
         console.print(f"[red]unknown run:[/red] {run_id}")
         raise typer.Exit(code=1)
+    expected_stage = f"approval:{checkpoint}"
+    if run["status"] != "awaiting_approval" or run.get("current_stage") != expected_stage:
+        console.print(
+            f"[red]run is not awaiting {checkpoint} approval[/red]"
+        )
+        raise typer.Exit(code=1)
+    if any(a["checkpoint"] == checkpoint for a in store.approvals_for_run(run_id)):
+        console.print(f"[red]{checkpoint} approval already recorded[/red]")
+        raise typer.Exit(code=1)
     from .audit import RunRecord
     record = RunRecord(
         run_id=run_id, artifacts_dir=Path(run["artifacts_dir"]),

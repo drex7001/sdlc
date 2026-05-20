@@ -10,16 +10,17 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 AC_ID_PATTERN = re.compile(r"^AC-\d+$")
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class AcceptanceCriterion(BaseModel):
     id: str = Field(description="Stable ID, e.g. AC-1. Tests reference this.")
-    description: str
+    description: NonEmptyStr
 
     @field_validator("id")
     @classmethod
@@ -32,13 +33,13 @@ class AcceptanceCriterion(BaseModel):
 class FeatureSpec(BaseModel):
     """Canonical, validated feature specification."""
 
-    name: str = Field(description="Short feature identifier (kebab-case).")
-    objective: str
-    user_story: str
-    business_rules: list[str] = Field(min_length=1)
+    name: NonEmptyStr = Field(description="Short feature identifier (kebab-case).")
+    objective: NonEmptyStr
+    user_story: NonEmptyStr
+    business_rules: list[NonEmptyStr] = Field(min_length=1)
     acceptance_criteria: list[AcceptanceCriterion] = Field(min_length=1)
-    non_functional: list[str] = Field(default_factory=list)
-    out_of_scope: list[str] = Field(default_factory=list)
+    non_functional: list[NonEmptyStr] = Field(min_length=1)
+    out_of_scope: list[NonEmptyStr] = Field(min_length=1)
 
     @field_validator("acceptance_criteria")
     @classmethod

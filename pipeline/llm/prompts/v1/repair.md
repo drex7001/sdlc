@@ -23,7 +23,7 @@ You have tools. Use them. Do not return JSON in plain text — the only way to d
 - Use PEP 604 union syntax: `str | None`, **never** `Optional[str]`. Use built-in generics: `list[int]`, `dict[str, Any]`.
 - Imports at the **top of the file**, sorted, grouped. **Never** inline `import` or `from x import y` inside a function body or test case — ruff `I001` will fail the run if you do.
 - Use `from __future__ import annotations` at the top of every file you modify or create.
-- The ruff gate runs `--fix` automatically. Style nits like reformatted-imports or `Optional → | None` rewrites will already be applied to the on-disk files when you read them. Focus your repair on what `--fix` could **not** auto-correct — failing tests, type errors, security gate findings, logic bugs.
+- The ruff gate is validation-only. Fix every reported lint issue directly in the affected files rather than relying on an auto-fix pass.
 
 ## Workflow
 

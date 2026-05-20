@@ -8,27 +8,33 @@ Tests are produced by the LLM and must:
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
 from ..audit import AuditStore, RunRecord
 from ..implementation.codegen import GeneratedChanges
-from ..implementation.sandbox import SandboxViolation
+from ..implementation.sandbox import SandboxViolation, validate_paths
 from ..intake import FeatureSpec
 from ..llm import LLMClient, load_prompt
 from ..planning import Plan
 from ..planning.planner import _extract_json
 
 
-def _validate_test_paths(changes: GeneratedChanges, allowed: set[str]) -> None:
-    """Two checks: paths must be in the plan AND must live under tests/."""
+def _validate_test_paths(
+    changes: GeneratedChanges,
+    allowed: set[str],
+    target_dir: Path,
+) -> None:
+    """Use the shared sandbox, then constrain testgen to tests/."""
+    validate_paths(
+        paths=[fc.path for fc in changes.files],
+        allowed=allowed,
+        target_dir=target_dir,
+    )
     for fc in changes.files:
-        if fc.path not in allowed:
-            raise SandboxViolation(
-                f"test file {fc.path!r} is not in the plan's impacted_files."
-            )
-        if not fc.path.startswith("tests/"):
+        p = PurePosixPath(fc.path)
+        if not p.parts or p.parts[0] != "tests":
             raise SandboxViolation(
                 f"test file {fc.path!r} must live under tests/."
             )
@@ -82,7 +88,7 @@ def generate_tests(
     except (ValueError, ValidationError) as e:
         raise ValueError(f"testgen output invalid: {e}") from e
 
-    _validate_test_paths(changes, plan.impacted_set())
+    _validate_test_paths(changes, plan.impacted_set(), target_dir)
 
     audit.write_json_artifact(
         run,

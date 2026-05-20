@@ -37,6 +37,7 @@ def run_gates(
     test_changes: GeneratedChanges,
     run: RunRecord,
     audit: AuditStore,
+    stage_label: str = "gates",
 ) -> GateReport:
     """Run all gates in order. Continues through failures so the operator
     sees the full report — the pipeline-level decision to halt is taken by
@@ -46,7 +47,9 @@ def run_gates(
 
     def _record(outcome: GateOutcome) -> None:
         artifact = audit.write_artifact(
-            run, f"gate_{outcome.name}.log", outcome.output or "(no output)"
+            run,
+            f"gate_{stage_label}_{outcome.name}.log",
+            outcome.output or "(no output)",
         )
         report.outcomes.append(outcome)
         audit.record_gate(

@@ -16,6 +16,8 @@ REQUIRED_SECTIONS = (
     "user_story",
     "business_rules",
     "acceptance_criteria",
+    "non_functional",
+    "out_of_scope",
 )
 
 

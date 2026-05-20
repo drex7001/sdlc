@@ -158,7 +158,7 @@ def run_pipeline(
             lambda: run_gates(
                 target_dir=settings.target_dir, plan=plan,
                 impl_changes=impl_changes, test_changes=test_changes,
-                run=run, audit=audit,
+                run=run, audit=audit, stage_label="gates",
             ),
         )
         result.gate_report = gate_report
@@ -199,12 +199,13 @@ def run_pipeline(
 
             # Re-run gates after the repair. Each attempt's gate results get
             # their own rows; the run-level gate_report tracks the latest.
+            gates_stage_label = f"gates_after_{stage_label}"
             gate_report = _stage(
                 audit, run, f"gates_after_{stage_label}", metrics,
-                lambda: run_gates(
+                lambda _gates_stage_label=gates_stage_label: run_gates(
                     target_dir=settings.target_dir, plan=plan,
                     impl_changes=impl_changes, test_changes=test_changes,
-                    run=run, audit=audit,
+                    run=run, audit=audit, stage_label=_gates_stage_label,
                 ),
             )
             result.gate_report = gate_report
@@ -223,6 +224,11 @@ def run_pipeline(
             failed = [o.name for o in gate_report.outcomes if not o.passed]
             raise PipelineError(
                 f"gates failed after {result.repair_attempts} repair attempt(s): {failed}"
+            )
+        if covered != len(spec.acceptance_criteria):
+            missing = sorted(ac for ac, refs in ac_coverage.items() if not refs)
+            raise PipelineError(
+                "acceptance criteria missing test coverage: " + ", ".join(missing)
             )
 
         # --- 7. Approval #2 ----------------------------------------------

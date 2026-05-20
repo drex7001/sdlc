@@ -16,6 +16,18 @@ def _write(tmp: Path, name: str, content: str) -> Path:
     return p
 
 
+def _valid_payload() -> dict:
+    return {
+        "name": "x",
+        "objective": "o",
+        "user_story": "u",
+        "business_rules": ["r"],
+        "acceptance_criteria": [{"id": "AC-1", "description": "d"}],
+        "non_functional": ["nfr"],
+        "out_of_scope": ["scope"],
+    }
+
+
 def test_yaml_parser_round_trip(example_spec_path: Path) -> None:
     data = parse_spec_file(example_spec_path)
     assert data["name"] == "rate-limit-status-endpoint"
@@ -24,11 +36,7 @@ def test_yaml_parser_round_trip(example_spec_path: Path) -> None:
 
 
 def test_json_parser_round_trip(tmp_path: Path) -> None:
-    payload = {
-        "name": "x", "objective": "o", "user_story": "u",
-        "business_rules": ["r"],
-        "acceptance_criteria": [{"id": "AC-1", "description": "d"}],
-    }
+    payload = _valid_payload()
     f = _write(tmp_path, "s.json", json.dumps(payload))
     data = parse_spec_file(f)
     assert data["name"] == "x"
@@ -66,27 +74,40 @@ def test_validate_missing_section_lists_all_missing() -> None:
     assert "objective" in msg
     assert "user_story" in msg
     assert "acceptance_criteria" in msg
+    assert "non_functional" in msg
+    assert "out_of_scope" in msg
 
 
 def test_validate_rejects_duplicate_ac_ids() -> None:
+    payload = _valid_payload()
+    payload["acceptance_criteria"] = [
+        {"id": "AC-1", "description": "a"},
+        {"id": "AC-1", "description": "b"},
+    ]
     with pytest.raises(SpecValidationError):
-        validate_spec({
-            "name": "x", "objective": "o", "user_story": "u",
-            "business_rules": ["r"],
-            "acceptance_criteria": [
-                {"id": "AC-1", "description": "a"},
-                {"id": "AC-1", "description": "b"},
-            ],
-        })
+        validate_spec(payload)
 
 
 def test_validate_rejects_bad_ac_id_format() -> None:
+    payload = _valid_payload()
+    payload["acceptance_criteria"] = [{"id": "AC1", "description": "a"}]
     with pytest.raises(SpecValidationError):
-        validate_spec({
-            "name": "x", "objective": "o", "user_story": "u",
-            "business_rules": ["r"],
-            "acceptance_criteria": [{"id": "AC1", "description": "a"}],
-        })
+        validate_spec(payload)
+
+
+def test_validate_rejects_empty_required_content() -> None:
+    payload = _valid_payload()
+    payload["objective"] = ""
+    payload["business_rules"] = [""]
+    payload["acceptance_criteria"] = [{"id": "AC-1", "description": ""}]
+
+    with pytest.raises(SpecValidationError) as exc_info:
+        validate_spec(payload)
+
+    msg = str(exc_info.value)
+    assert "objective" in msg
+    assert "business_rules.0" in msg
+    assert "acceptance_criteria.0.description" in msg
 
 
 def test_load_and_validate_example_yaml(example_spec_path: Path) -> None:

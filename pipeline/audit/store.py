@@ -121,7 +121,7 @@ class AuditStore:
     def list_runs(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as con:
             rows = con.execute(
-                "SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM runs ORDER BY started_at DESC, rowid DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
 

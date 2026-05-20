@@ -71,6 +71,24 @@
 </section>
 {% endif %}
 
+{% if ac_failed_summary %}
+<section class="card halted">
+    <h3>Run halted at acceptance coverage — no <em>Approve #2</em> requested</h3>
+    <p>
+        All final quality gates passed, but these acceptance criteria were not
+        referenced by generated tests:
+    </p>
+    <ul>
+        {% for ac_id in ac_failed_summary %}<li><code>{{ ac_id }}</code></li>{% endfor %}
+    </ul>
+    <p class="muted">
+        Add or regenerate tests that reference each missing AC ID, then re-run
+        the pipeline. The finalize approval checkpoint appears only after gate
+        and AC coverage checks pass.
+    </p>
+</section>
+{% endif %}
+
 {# ---------- Inline approval panel ---------- #}
 {% if pending_checkpoint == "plan" and plan %}
 <section class="card pending approval-panel">

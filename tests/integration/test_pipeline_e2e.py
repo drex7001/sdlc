@@ -170,3 +170,33 @@ def test_test_apply_failure_is_recorded_on_testgen_stage(
     assert stages[-1]["status"] == "failed"
     assert "testgen wanted to create tests/test_status.py" in stages[-1]["error"]
     assert store.gates_for_run(run["run_id"]) == []
+
+
+def test_missing_acceptance_coverage_fails_run(
+    monkeypatch: pytest.MonkeyPatch,
+    sample_target: Path,
+    runs_dir: Path,
+    audit_db: Path,
+    example_spec_path: Path,
+) -> None:
+    settings = _settings(sample_target, runs_dir, audit_db)
+
+    def fake_ac_coverage(tests_dir: Path, ac_ids: set[str]) -> dict[str, list[str]]:
+        return {
+            ac: ([] if ac == "AC-4" else ["test_status.py:1"])
+            for ac in ac_ids
+        }
+
+    monkeypatch.setattr("pipeline.orchestrator.compute_ac_coverage", fake_ac_coverage)
+
+    with pytest.raises(PipelineError, match="acceptance criteria missing test coverage: AC-4"):
+        run_pipeline(
+            spec_path=example_spec_path,
+            settings=settings,
+            approval_mode=ApprovalMode.AUTO,
+        )
+
+    store = AuditStore(db_path=audit_db, runs_dir=runs_dir)
+    run = store.list_runs(limit=1)[0]
+    assert run["status"] == "failed"
+    assert (Path(run["artifacts_dir"]) / "ac_coverage.json").exists()

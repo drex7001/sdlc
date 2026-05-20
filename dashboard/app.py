@@ -272,10 +272,12 @@ def run_detail(request: Request, run_id: str) -> HTMLResponse:
 
     # If the run failed at gates, surface that to explain the missing approve#2.
     gates_failed_summary = _gates_failed_summary(run["status"], gates)
+    ac_failed_summary = _ac_failed_summary(run["status"], ac_coverage)
 
     signature = _structural_signature(
         run, stages, gates, approvals, artifacts,
-        pending_checkpoint, just_approved_checkpoint, gates_failed_summary,
+        pending_checkpoint, just_approved_checkpoint,
+        gates_failed_summary, ac_failed_summary,
     )
 
     return templates.TemplateResponse(
@@ -298,6 +300,7 @@ def run_detail(request: Request, run_id: str) -> HTMLResponse:
             "workflow": workflow,
             "is_live": is_live,
             "gates_failed_summary": gates_failed_summary,
+            "ac_failed_summary": ac_failed_summary,
             "structural_signature": signature,
         },
     )
@@ -339,8 +342,31 @@ def _gates_failed_summary(
 ) -> list[str] | None:
     if run_status != "failed" or not gates:
         return None
-    failed = [g["gate"] for g in gates if g["status"] == "failed"]
+    final_round = _final_gate_round(gates)
+    failed = [g["gate"] for g in final_round if g["status"] == "failed"]
     return failed or None
+
+
+def _final_gate_round(gates: list[dict]) -> list[dict]:
+    if not gates:
+        return []
+    names = []
+    for gate in reversed(gates):
+        name = gate["gate"]
+        if name in names:
+            break
+        names.append(name)
+    return list(reversed(gates[-len(names):]))
+
+
+def _ac_failed_summary(
+    run_status: str,
+    ac_coverage: dict[str, list[str]] | None,
+) -> list[str] | None:
+    if run_status != "failed" or not ac_coverage:
+        return None
+    missing = sorted(ac_id for ac_id, tests in ac_coverage.items() if not tests)
+    return missing or None
 
 
 def _structural_signature(
@@ -352,6 +378,7 @@ def _structural_signature(
     pending_checkpoint: str | None,
     just_approved_checkpoint: str | None,
     gates_failed_summary: list[str] | None,
+    ac_failed_summary: list[str] | None,
 ) -> str:
     """Stable hash of fields that, on change, demand a soft page reload.
 
@@ -369,6 +396,7 @@ def _structural_signature(
         pending_checkpoint or "",
         just_approved_checkpoint or "",
         ",".join(gates_failed_summary or []),
+        ",".join(ac_failed_summary or []),
     ]
     return "|".join(parts)
 
@@ -604,16 +632,23 @@ def run_state(run_id: str) -> JSONResponse:
     artifact_count = 0
     if artifacts_dir.exists():
         artifact_count = sum(1 for p in artifacts_dir.rglob("*") if p.is_file())
+    ac_coverage: dict[str, list[str]] | None = None
+    ac_file = artifacts_dir / "ac_coverage.json"
+    if ac_file.exists():
+        with contextlib.suppress(json.JSONDecodeError):
+            ac_coverage = json.loads(ac_file.read_text(encoding="utf-8"))
 
     pending_checkpoint, just_approved_checkpoint = _approval_state(run, approvals)
     workflow = _workflow_status(stages, approvals, gates, run["status"], run.get("current_stage"))
     gates_failed_summary = _gates_failed_summary(run["status"], gates)
+    ac_failed_summary = _ac_failed_summary(run["status"], ac_coverage)
     is_live = run["status"] in {"pending", "running", "awaiting_approval"}
     signature = _structural_signature(
         run, stages, gates,
         approvals,
         [""] * artifact_count,  # only the count matters for the signature
-        pending_checkpoint, just_approved_checkpoint, gates_failed_summary,
+        pending_checkpoint, just_approved_checkpoint,
+        gates_failed_summary, ac_failed_summary,
     )
 
     return JSONResponse({
@@ -649,6 +684,7 @@ def run_state(run_id: str) -> JSONResponse:
         "pending_checkpoint": pending_checkpoint,
         "just_approved_checkpoint": just_approved_checkpoint,
         "gates_failed_summary": gates_failed_summary,
+        "ac_failed_summary": ac_failed_summary,
         "is_live": is_live,
         "artifact_count": artifact_count,
         "structural_signature": signature,
@@ -826,6 +862,17 @@ def post_approval(
         raise HTTPException(status_code=400, detail="invalid checkpoint")
     store = _store()
     run = _run_or_404(store, run_id)
+    expected_stage = f"approval:{checkpoint}"
+    if run["status"] != "awaiting_approval" or run.get("current_stage") != expected_stage:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run is not awaiting {checkpoint} approval",
+        )
+    if any(a["checkpoint"] == checkpoint for a in store.approvals_for_run(run_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{checkpoint} approval already recorded",
+        )
     record = RunRecord(
         run_id=run_id,
         artifacts_dir=Path(run["artifacts_dir"]),

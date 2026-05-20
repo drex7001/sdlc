@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .base import GateOutcome, run_module
 
-AC_TAG = re.compile(r"AC:\s*(AC-\d+)")
+AC_TAG = re.compile(r"\b(?:AC:\s*)?(AC-\d+)\b")
 
 
 def run(target_dir: Path) -> GateOutcome:
