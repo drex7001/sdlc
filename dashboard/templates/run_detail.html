@@ -34,7 +34,23 @@
         <h3>Metrics</h3>
         <ul>
             <li>Tokens: <span data-metric="total_tokens">{{ metrics.total_tokens if metrics else 0 }}</span></li>
+            <li>
+                Token split:
+                <span data-metric="total_input_tokens">{{ metrics.total_input_tokens if metrics else 0 }}</span> in /
+                <span data-metric="total_output_tokens">{{ metrics.total_output_tokens if metrics else 0 }}</span> out
+            </li>
+            <li>
+                LLM calls:
+                <span data-metric="llm_calls">{{ metrics.llm_calls if metrics else 0 }}</span>
+                (<span data-metric="llm_latency_ms">{{ metrics.llm_latency_ms if metrics else 0 }}</span> ms)
+            </li>
+            <li>
+                Est. cost (USD):
+                <span data-metric="estimated_cost_usd">{{ "%.6f"|format(metrics.estimated_cost_usd) if metrics and metrics.cost_configured else "-" }}</span>
+            </li>
             <li>Duration: <span data-metric="total_duration_ms">{{ metrics.total_duration_ms if metrics else 0 }}</span> ms</li>
+            <li>Stage time: <span data-metric="stage_duration_ms">{{ metrics.stage_duration_ms if metrics else 0 }}</span> ms</li>
+            <li>Gate time: <span data-metric="gate_duration_ms">{{ metrics.gate_duration_ms if metrics else 0 }}</span> ms</li>
             <li>AC coverage: <span data-metric="ac_covered">{{ metrics.ac_covered if metrics else '-' }}</span>/<span data-metric="ac_total">{{ metrics.ac_total if metrics else '-' }}</span></li>
             <li>Gates: <span data-metric="gates_passed">{{ metrics.gates_passed if metrics else '-' }}</span>/<span data-metric="gates_total">{{ metrics.gates_total if metrics else '-' }}</span></li>
         </ul>

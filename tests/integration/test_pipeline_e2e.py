@@ -46,6 +46,10 @@ def test_happy_path_succeeds(
     assert result.gate_report.all_passed
     assert result.gate_report.total == 5
     assert result.metrics is not None
+    assert result.metrics["total_tokens"] > 0
+    assert result.metrics["total_input_tokens"] > 0
+    assert result.metrics["total_output_tokens"] > 0
+    assert result.metrics["llm_calls"] >= 3
     assert result.metrics["ac_total"] == 4
     assert result.metrics["ac_covered"] == 4
 

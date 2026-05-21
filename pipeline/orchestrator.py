@@ -258,8 +258,7 @@ def run_pipeline(
         raise PipelineError(str(e)) from e
     finally:
         snapshot = metrics.snapshot()
-        result.metrics = snapshot
-        audit.record_metrics(run, snapshot)
+        result.metrics = audit.record_metrics(run, snapshot)
 
     return result
 

@@ -70,9 +70,18 @@ CREATE INDEX IF NOT EXISTS idx_gates_run ON gate_results(run_id);
 CREATE TABLE IF NOT EXISTS metrics (
     run_id        TEXT PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
     total_tokens  INTEGER,
+    total_input_tokens INTEGER,
+    total_output_tokens INTEGER,
     total_duration_ms INTEGER,
     ac_total      INTEGER,
     ac_covered    INTEGER,
+    ac_coverage_pct REAL,
     gates_passed  INTEGER,
-    gates_total   INTEGER
+    gates_total   INTEGER,
+    llm_calls     INTEGER,
+    llm_latency_ms INTEGER,
+    stage_duration_ms INTEGER,
+    gate_duration_ms INTEGER,
+    gate_results_count INTEGER,
+    estimated_cost_usd REAL
 );

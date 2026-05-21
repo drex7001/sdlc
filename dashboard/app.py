@@ -675,11 +675,23 @@ def run_state(run_id: str) -> JSONResponse:
         ],
         "metrics": {
             "total_tokens": metrics.get("total_tokens") or 0,
+            "total_input_tokens": metrics.get("total_input_tokens") or 0,
+            "total_output_tokens": metrics.get("total_output_tokens") or 0,
             "total_duration_ms": metrics.get("total_duration_ms") or 0,
+            "llm_calls": metrics.get("llm_calls") or 0,
+            "llm_latency_ms": metrics.get("llm_latency_ms") or 0,
+            "estimated_cost_usd": (
+                metrics.get("estimated_cost_usd") if metrics.get("cost_configured") else None
+            ),
+            "cost_configured": metrics.get("cost_configured") or False,
+            "stage_duration_ms": metrics.get("stage_duration_ms") or 0,
+            "gate_duration_ms": metrics.get("gate_duration_ms") or 0,
             "ac_total": metrics.get("ac_total"),
             "ac_covered": metrics.get("ac_covered"),
+            "ac_coverage_pct": metrics.get("ac_coverage_pct"),
             "gates_passed": metrics.get("gates_passed"),
             "gates_total": metrics.get("gates_total"),
+            "gate_results_count": metrics.get("gate_results_count"),
         },
         "pending_checkpoint": pending_checkpoint,
         "just_approved_checkpoint": just_approved_checkpoint,

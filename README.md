@@ -195,6 +195,9 @@ All are read from process env or from a `.env` file at the repo root (auto-loade
 | `PIPELINE_CODEGEN_MODEL` | falls back to `PIPELINE_LLM_MODEL` | Model used for code generation. |
 | `PIPELINE_TESTGEN_MODEL` | falls back to `PIPELINE_LLM_MODEL` | Model used for test generation. |
 | `PIPELINE_MAX_TOKENS` | `8192` | Max output tokens per LLM call. Bump if codegen is being truncated. |
+| `PIPELINE_LLM_PRICING_JSON` | unset | Optional JSON map of USD per 1M token rates, keyed by `provider/model`, `model`, `provider`, or `default`. Enables estimated cost metrics. |
+| `PIPELINE_INPUT_TOKEN_COST_PER_1M` / `PIPELINE_OUTPUT_TOKEN_COST_PER_1M` | unset | Optional generic USD per 1M token rates used when no per-model pricing JSON is configured. |
+| `PIPELINE_CACHE_CREATION_INPUT_TOKEN_COST_PER_1M` / `PIPELINE_CACHE_READ_INPUT_TOKEN_COST_PER_1M` | unset | Optional generic cache-token rates for providers that report cache usage. |
 | `PIPELINE_PROMPT_VERSION` | `v1` | Subdirectory under `pipeline/llm/prompts/`. Pinned per run. |
 | `PIPELINE_TARGET_DIR` | `./targets/flask-status` | Repo the pipeline modifies. Set to `./targets/crud-api` for the CRUD series. |
 | `PIPELINE_RUNS_DIR` | `./runs` | Where artifact directories are written. |
