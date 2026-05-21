@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from ..audit import AuditStore, RunRecord
 from ..implementation.codegen import GeneratedChanges
+from ..implementation.normalization import normalize_python_changes
 from ..implementation.sandbox import SandboxViolation, validate_paths
 from ..intake import FeatureSpec
 from ..llm import LLMClient, load_prompt
@@ -89,6 +90,7 @@ def generate_tests(
         raise ValueError(f"testgen output invalid: {e}") from e
 
     _validate_test_paths(changes, plan.impacted_set(), target_dir)
+    changes = normalize_python_changes(changes=changes, target_dir=target_dir)
 
     audit.write_json_artifact(
         run,

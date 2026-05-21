@@ -63,9 +63,12 @@ PY
 reset_crud_api() {
     local root="${TARGETS_DIR}/crud-api"
     rm -f \
+        "${root}/src/crud_app/endpoints.py" \
         "${root}/src/crud_app/items.py" \
+        "${root}/src/crud_app/models.py" \
         "${root}/src/crud_app/store.py" \
         "${root}/tests/test_create_item.py" \
+        "${root}/tests/test_endpoints.py" \
         "${root}/tests/test_items.py" \
         "${root}/tests/test_list_items.py" \
         "${root}/tests/test_delete_item.py"

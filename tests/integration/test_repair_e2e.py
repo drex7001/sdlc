@@ -85,11 +85,17 @@ def test_repair_loop_recovers_a_failing_run(
     assert "gates_after_repair_1" in stages
 
 
-def test_repair_loop_gives_up_after_max_attempts(
-    sample_target: Path, runs_dir: Path, audit_db: Path, example_spec_path: Path,
+def test_repair_loop_fails_when_candidates_never_validate(
+    monkeypatch: pytest.MonkeyPatch,
+    sample_target: Path,
+    runs_dir: Path,
+    audit_db: Path,
+    example_spec_path: Path,
 ) -> None:
+    monkeypatch.setenv("PIPELINE_MAX_AGENT_TURNS", "2")
     MockClient.set_scenario("codegen_agent", [{"write": _broken_codegen()}])
-    # Repair attempts both return __init__.py *still broken* — neither fix sticks.
+    # The validator feeds these failures back into the same repair attempt.
+    # If the agent keeps returning bad candidates, the attempt fails fast.
     broken_init_modify = {
         "files": [{
             "path": "src/sample_app/__init__.py",
@@ -106,7 +112,7 @@ def test_repair_loop_gives_up_after_max_attempts(
     settings = _settings(sample_target, runs_dir, audit_db)
     settings = replace(settings, max_repair_attempts=2)
 
-    with pytest.raises(PipelineError, match="after 2 repair attempt"):
+    with pytest.raises(PipelineError, match="exhausted 2 turns"):
         run_pipeline(
             spec_path=example_spec_path, settings=settings, approval_mode=ApprovalMode.AUTO,
         )
@@ -116,5 +122,4 @@ def test_repair_loop_gives_up_after_max_attempts(
     assert run["status"] == "failed"
     stage_names = [s["stage"] for s in store.stages_for_run(run["run_id"])]
     assert "repair_1" in stage_names
-    assert "repair_2" in stage_names
-    assert "gates_after_repair_2" in stage_names
+    assert "gates_after_repair_1" not in stage_names

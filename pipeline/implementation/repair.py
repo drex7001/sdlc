@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from ..audit import AuditStore, RunRecord
 from ..gates import GateReport
@@ -18,8 +21,9 @@ from ..intake import FeatureSpec
 from ..llm import LLMClient, load_prompt
 from ..planning import Plan
 from ..planning.planner import _list_tree
-from .agent_tools import REPAIR_TOOLS, AgentLoopError, ToolLoop
+from .agent_tools import REPAIR_TOOLS, AgentLoopError, ToolLoop, WriteValidationResult
 from .codegen_schema import GeneratedChanges
+from .normalization import changed_target_workspace, normalize_python_changes_in_workspace
 
 
 def run_repair_agent(
@@ -49,7 +53,7 @@ def run_repair_agent(
             "codegen_summary": impl_summary,
             "testgen_summary": test_summary,
             "failing_gates": [
-                {"gate": o.name, "summary": o.summary}
+                {"gate": o.name, "summary": o.summary, "log": o.output}
                 for o in failing
             ],
             "target_tree": _list_tree(target_dir),
@@ -73,6 +77,7 @@ def run_repair_agent(
         max_tokens=max_tokens,
         max_turns=_max_turns(),
         gate_logs=gate_logs,
+        validate_write=_repair_write_validator(target_dir),
     )
 
     try:
@@ -99,3 +104,87 @@ def _max_turns() -> int:
         return max(1, int(os.environ.get("PIPELINE_MAX_AGENT_TURNS", "12")))
     except ValueError:
         return 12
+
+
+@dataclass
+class _CommandResult:
+    name: str
+    args: list[str]
+    returncode: int
+    output: str
+
+    @property
+    def passed(self) -> bool:
+        return self.returncode == 0
+
+
+def _repair_write_validator(target_dir: Path):
+    def validate(changes: GeneratedChanges) -> WriteValidationResult:
+        try:
+            with changed_target_workspace(
+                target_dir=target_dir,
+                changes=changes,
+                strict=True,
+            ) as workspace:
+                normalized = normalize_python_changes_in_workspace(
+                    changes=changes,
+                    workspace=workspace,
+                )
+                results = _run_fast_validation(workspace=workspace, changes=normalized)
+        except (FileExistsError, FileNotFoundError) as e:
+            return WriteValidationResult.rejected(str(e))
+
+        failed = [result for result in results if not result.passed]
+        if failed:
+            return WriteValidationResult.rejected(_format_validation_failure(failed))
+        return WriteValidationResult.accepted(normalized)
+
+    return validate
+
+
+def _run_fast_validation(*, workspace: Path, changes: GeneratedChanges) -> list[_CommandResult]:
+    results: list[_CommandResult] = []
+    py_paths = [
+        change.path
+        for change in changes.files
+        if change.action != "delete" and PurePosixPath(change.path).suffix == ".py"
+    ]
+    if py_paths:
+        results.append(_run_python_module("ruff", ["check", *py_paths], cwd=workspace))
+    if (workspace / "src").is_dir():
+        results.append(_run_python_module("mypy", ["src"], cwd=workspace))
+    return results
+
+
+def _run_python_module(module: str, args: list[str], *, cwd: Path) -> _CommandResult:
+    command = [sys.executable, "-m", module, *args]
+    proc = subprocess.run(  # noqa: S603
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return _CommandResult(
+        name=module,
+        args=command,
+        returncode=proc.returncode,
+        output=_truncate((proc.stdout or "") + (proc.stderr or "")),
+    )
+
+
+def _format_validation_failure(failed: list[_CommandResult]) -> str:
+    lines = [
+        "candidate failed fast validation after ruff normalization; "
+        "fix the reported issues and call write_files again.",
+    ]
+    for result in failed:
+        lines.append(f"\n{result.name} exit={result.returncode}:")
+        lines.append(result.output or "(no output)")
+    return "\n".join(lines)
+
+
+def _truncate(text: str, limit: int = 8000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,24 @@ class AgentLoopError(RuntimeError):
     """Raised when the agent loop cannot reach a clean termination."""
 
 
+class WriteValidationError(RuntimeError):
+    """Raised when a candidate write is syntactically valid but gate-invalid."""
+
+
+@dataclass
+class WriteValidationResult:
+    changes: GeneratedChanges | None
+    error: str = ""
+
+    @classmethod
+    def accepted(cls, changes: GeneratedChanges) -> WriteValidationResult:
+        return cls(changes=changes)
+
+    @classmethod
+    def rejected(cls, error: str) -> WriteValidationResult:
+        return cls(changes=None, error=error)
+
+
 @dataclass
 class ToolLoopResult:
     changes: GeneratedChanges
@@ -151,6 +170,7 @@ class ToolLoop:
     max_turns: int = 12
     # Repair-only: gate logs to expose via read_gate_log.
     gate_logs: dict[str, str] = field(default_factory=dict)
+    validate_write: Callable[[GeneratedChanges], WriteValidationResult] | None = None
 
     def run_loop(self, initial_user_message: str) -> ToolLoopResult:
         messages: list[dict[str, Any]] = [
@@ -198,6 +218,14 @@ class ToolLoop:
                     continue
                 except ValidationError as e:
                     msg = f"invalid arguments: {e}"
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id,
+                        "content": msg, "is_error": True,
+                    })
+                    self._persist_tool_result(turn, tu, msg, is_error=True)
+                    continue
+                except WriteValidationError as e:
+                    msg = f"write_files failed validation: {e}"
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id,
                         "content": msg, "is_error": True,
@@ -288,7 +316,7 @@ class ToolLoop:
             if "__pycache__" in rel_p.parts:
                 continue
             if p.is_file():
-                paths.append(str(rel_p))
+                paths.append(rel_p.as_posix())
                 if len(paths) >= 200:
                     break
         return "\n".join(paths) if paths else "(no files)"
@@ -327,6 +355,11 @@ class ToolLoop:
             allowed=self.allowed_paths,
             target_dir=self.target_dir,
         )
+        if self.validate_write is not None:
+            validation = self.validate_write(changes)
+            if validation.changes is None:
+                raise WriteValidationError(validation.error)
+            changes = validation.changes
         return changes
 
     # --- persistence ---------------------------------------------------------

@@ -43,7 +43,7 @@ def _list_tree(root: Path, limit: int = 200) -> list[str]:
         if "__pycache__" in p.parts:
             continue
         if p.is_file():
-            paths.append(str(p.relative_to(root)))
+            paths.append(p.relative_to(root).as_posix())
             if len(paths) >= limit:
                 break
     return paths
@@ -152,7 +152,7 @@ def _missing_local_import_targets(target_dir: Path, rel_files: list[str]) -> set
             module_file = src_dir.joinpath(*parts).with_suffix(".py")
             package_init = src_dir.joinpath(*parts, "__init__.py")
             if not module_file.exists() and not package_init.exists():
-                missing.add(str(module_file.relative_to(target_dir)))
+                missing.add(module_file.relative_to(target_dir).as_posix())
     return missing
 
 

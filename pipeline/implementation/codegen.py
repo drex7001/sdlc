@@ -19,6 +19,7 @@ from ..planning import Plan, gather_plan_context
 from ..planning.planner import _list_tree
 from .agent_tools import CODEGEN_TOOLS, AgentLoopError, ToolLoop
 from .codegen_schema import FileChange, GeneratedChanges
+from .normalization import normalize_python_changes
 
 __all__ = ["FileChange", "GeneratedChanges", "generate_code"]
 
@@ -66,7 +67,7 @@ def generate_code(
     except AgentLoopError as e:
         raise ValueError(f"codegen agent failed: {e}") from e
 
-    changes = result.changes
+    changes = normalize_python_changes(changes=result.changes, target_dir=target_dir)
     audit.write_json_artifact(
         run,
         "codegen_output.json",

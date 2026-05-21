@@ -23,7 +23,9 @@ You have tools. Use them. Do not return JSON in plain text — the only way to d
 - Use PEP 604 union syntax: `str | None`, **never** `Optional[str]`. Use built-in generics: `list[int]`, `dict[str, Any]`.
 - Imports at the **top of the file**, sorted, grouped. **Never** inline `import` or `from x import y` inside a function body or test case — ruff `I001` will fail the run if you do.
 - Use `from __future__ import annotations` at the top of every file you modify or create.
-- The ruff gate is validation-only. Fix every reported lint issue directly in the affected files rather than relying on an auto-fix pass.
+- When the ruff log says issues are fixable with `--fix`, the repair stage may have already run a sandboxed `ruff check --fix` over `plan.impacted_files`. Inspect the current file before making any further lint edits, and do not churn import blocks that are already fixed.
+- For pytest failures involving shared in-memory state, reset or move the state in the module that actually owns it. Do not use `global` in a test file to assign names that the app reads from another module; for example, `global next_id` in `tests/test_*.py` does not reset `src.crud_app.endpoints.next_id`.
+- For Flask `@app.before_request` hooks that may return a response, annotate the hook as `Response | None` and explicitly `return None` on the non-response path.
 
 ## Workflow
 
