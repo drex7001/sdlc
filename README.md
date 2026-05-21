@@ -23,7 +23,7 @@ Every run produces a directory under `runs/<run-id>/` containing the spec snapsh
 
 ## Demo
 
-[demo.mkv](demo.mkv) — screen recording of a full end-to-end pipeline run against the bundled `flask-status` target, including spec validation, plan approval, codegen, gate execution, and the dashboard.
+[demo.mp4](demo.mp4) — screen recording of a full end-to-end pipeline run against the bundled `flask-status` target, including spec validation, plan approval, codegen, gate execution, and the dashboard.
 
 ---
 
